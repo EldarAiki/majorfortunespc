@@ -130,8 +130,13 @@ export default function AgentView({ user, games, subPlayers }) {
                     groupBalance: 0,
                     totalRake: 0,
                     rakeback: 0,
-                    _parentFound: true // Clubs are root
+                    managerId: null, // Will be set if any user in club has managerId
+                    _parentFound: false // Clubs can be under managers
                 };
+            }
+            // Track managerId for clubs (if any user in a club has a managerId, the club is under that manager)
+            if (u.clubId && u.managerId && clubs[u.clubId]) {
+                clubs[u.clubId].managerId = u.managerId;
             }
         });
 
@@ -139,15 +144,26 @@ export default function AgentView({ user, games, subPlayers }) {
         nodes.forEach(node => {
             let parent = null;
 
+            // Priority order for finding parent:
+            // 1. Direct manager (managerId)
+            // 2. Direct agent/super agent
+            // 3. Club (if no direct manager/agent relationship)
+            
             if (node.type === 'PLAYER') {
-                if (node.agentId && nodes.has(node.agentId)) parent = nodes.get(node.agentId);
+                if (node.managerId && nodes.has(node.managerId)) parent = nodes.get(node.managerId);
+                else if (node.agentId && nodes.has(node.agentId)) parent = nodes.get(node.agentId);
                 else if (node.superAgentId && nodes.has(node.superAgentId)) parent = nodes.get(node.superAgentId);
                 else if (node.clubId && clubs[node.clubId]) parent = clubs[node.clubId];
             } else if (node.type === 'AGENT') {
-                if (node.superAgentId && nodes.has(node.superAgentId)) parent = nodes.get(node.superAgentId);
+                if (node.managerId && nodes.has(node.managerId)) parent = nodes.get(node.managerId);
+                else if (node.superAgentId && nodes.has(node.superAgentId)) parent = nodes.get(node.superAgentId);
                 else if (node.clubId && clubs[node.clubId]) parent = clubs[node.clubId];
             } else if (node.type === 'SUPER_AGENT') {
-                if (node.clubId && clubs[node.clubId]) parent = clubs[node.clubId];
+                if (node.managerId && nodes.has(node.managerId)) parent = nodes.get(node.managerId);
+                else if (node.clubId && clubs[node.clubId]) parent = clubs[node.clubId];
+            } else if (node.type === 'MANAGER') {
+                // Managers don't have parents (they're at the top)
+                node._parentFound = true;
             }
 
             if (parent && parent !== node) {
@@ -158,11 +174,30 @@ export default function AgentView({ user, games, subPlayers }) {
             }
         });
 
-        // 3. Third pass: Ensure orphans are attached to something (e.g. Club)
+        // 3. Third pass: Attach clubs to managers and handle remaining orphans
+        Object.values(clubs).forEach(club => {
+            if (!club._parentFound && club.managerId && nodes.has(club.managerId)) {
+                const managerNode = nodes.get(club.managerId);
+                if (!managerNode.children.find(c => c.id === club.id)) {
+                    managerNode.children.push(club);
+                    club._parentFound = true;
+                }
+            }
+        });
+
+        // 4. Fourth pass: Ensure remaining orphans are attached to clubs or managers
         nodes.forEach(node => {
-            if (!node._parentFound && node.clubId && clubs[node.clubId]) {
-                clubs[node.clubId].children.push(node);
-                node._parentFound = true;
+            if (!node._parentFound) {
+                if (node.clubId && clubs[node.clubId]) {
+                    clubs[node.clubId].children.push(node);
+                    node._parentFound = true;
+                } else if (node.managerId && nodes.has(node.managerId)) {
+                    const managerNode = nodes.get(node.managerId);
+                    if (!managerNode.children.find(c => c.id === node.id)) {
+                        managerNode.children.push(node);
+                        node._parentFound = true;
+                    }
+                }
             }
         });
 
@@ -182,7 +217,25 @@ export default function AgentView({ user, games, subPlayers }) {
             return { groupBalance: gBalance, totalRake: gRake };
         };
 
-        Object.values(clubs).forEach(aggregate);
+        // Aggregate all root nodes (managers, clubs without managers, and orphan nodes)
+        const rootNodes = [];
+        
+        // Find managers (they are root nodes)
+        nodes.forEach(node => {
+            if (node.type === 'MANAGER' && !node._parentFound) {
+                rootNodes.push(node);
+            }
+        });
+        
+        // Find clubs that don't have managers (or managers not in the current view)
+        Object.values(clubs).forEach(club => {
+            if (!club._parentFound) {
+                rootNodes.push(club);
+            }
+        });
+        
+        // Aggregate all root nodes
+        rootNodes.forEach(aggregate);
 
         // Filter Logic
         const filterTree = (nodes) => {
@@ -203,10 +256,10 @@ export default function AgentView({ user, games, subPlayers }) {
             });
         };
 
-        // Filter and Clean result
-        let result = Object.values(clubs).filter(c =>
-            (c.name && c.name !== "Unknown Club" && c.id) ||
-            (c.children && c.children.length > 0)
+        // Filter and Clean result - return root nodes (managers and clubs)
+        let result = rootNodes.filter(n =>
+            (n.name && n.name !== "Unknown Club" && n.id) ||
+            (n.children && n.children.length > 0)
         );
 
         if (activitySearchTerm) {
@@ -227,7 +280,7 @@ export default function AgentView({ user, games, subPlayers }) {
                 }
                 return null;
             };
-            const foundNode = findNode(Object.values(clubs), drilledUserId);
+            const foundNode = findNode(rootNodes, drilledUserId);
             return foundNode ? [foundNode] : result;
         }
 
@@ -248,6 +301,7 @@ export default function AgentView({ user, games, subPlayers }) {
                         <div className="flex items-center gap-2">
                             {isManagement ? (
                                 <div className={`p-1.5 rounded ${node.type === 'CLUB' ? 'bg-amber-100 text-amber-700' :
+                                    node.type === 'MANAGER' ? 'bg-green-100 text-green-700' :
                                     node.type === 'SUPER_AGENT' ? 'bg-purple-100 text-purple-700' :
                                         'bg-blue-100 text-blue-700'
                                     }`}>
@@ -261,7 +315,7 @@ export default function AgentView({ user, games, subPlayers }) {
                                     {name}
                                     {isManagement && (
                                         <span className="text-[10px] uppercase opacity-60 font-black px-1.5 py-0.5 rounded border border-current">
-                                            {node.type === 'SUPER_AGENT' ? 'SA' : node.type}
+                                            {node.type === 'SUPER_AGENT' ? 'SA' : node.type === 'MANAGER' ? 'MGR' : node.type}
                                         </span>
                                     )}
                                 </span>

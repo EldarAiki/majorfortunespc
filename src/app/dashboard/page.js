@@ -53,14 +53,23 @@ export default async function DashboardPage() {
         if (user.role === "ADMIN") {
             where = {}; // Admin sees all
         } else if (user.role === "MANAGER") {
-            // Manager sees only their club. 
-            // If clubId is null, they might see nothing or unassigned? 
-            // Best to assume they see matching clubId.
-            // If clubId is null for manager, they see nothing? Or unassigned users?
-            // Let's assume where clubId matches.
-            where = { clubId: user.clubId };
+            // Manager sees all their subordinates: clubs, super agents, agents, and players
+            // A user is under a manager if they have managerId = user.id
+            // OR if they belong to a club that has managerId = user.id
+            // OR if their superAgent/agent chain leads to a manager
+            
+            // Direct subordinates (users with managerId = this manager)
+            // Also need to include users in clubs under this manager
+            // For now, we'll fetch direct subordinates and handle club relationships separately
+            where = {
+                OR: [
+                    { managerId: user.id }, // Direct subordinates
+                    // Note: Club relationships will be handled in the hierarchy building logic
+                    // since clubs are stored as strings (clubId/clubName) rather than User records
+                ]
+            };
         } else {
-            // Agents
+            // Agents and Super Agents
             where = {
                 OR: [
                     { agentId: user.id },
@@ -74,6 +83,7 @@ export default async function DashboardPage() {
             include: {
                 agent: { select: { name: true, code: true } },
                 superAgent: { select: { name: true, code: true } },
+                manager: { select: { name: true, code: true } },
 
                 gameSessions: {
                     where: { cycleId: currentCycleId },

@@ -27,7 +27,10 @@ export async function GET(req, { params }) {
         // Authorization check
         if (session.user.role !== "MANAGER" && session.user.role !== "ADMIN") {
             // Check if user is downstream
-            if (targetUser.agentId !== session.user.id && targetUser.superAgentId !== session.user.id && targetUser.id !== session.user.id) {
+            if (targetUser.agentId !== session.user.id && 
+                targetUser.superAgentId !== session.user.id && 
+                targetUser.managerId !== session.user.id &&
+                targetUser.id !== session.user.id) {
                 // Additional check: maybe the targetUser is a player of one of this superAgent's agents
                 // But for now, let's allow it if they are in the same hierarchy
                 // (In a real app, you'd crawl up the tree to verify)
@@ -40,7 +43,16 @@ export async function GET(req, { params }) {
             games: []
         };
 
-        if (targetUser.role === "AGENT" || targetUser.role === "SUPER_AGENT") {
+        // Fetch subordinates based on role
+        if (targetUser.role === "MANAGER") {
+            // Manager can have clubs, super agents, agents, and players
+            details.subPlayers = await prisma.user.findMany({
+                where: {
+                    managerId: targetUser.id
+                },
+                orderBy: { code: 'asc' }
+            });
+        } else if (targetUser.role === "AGENT" || targetUser.role === "SUPER_AGENT") {
             details.subPlayers = await prisma.user.findMany({
                 where: {
                     OR: [

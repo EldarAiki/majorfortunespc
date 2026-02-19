@@ -21,11 +21,23 @@ export async function PATCH(req) {
         const targetUser = await prisma.user.findUnique({ where: { id: userId } });
         if (!targetUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-        // Agents can only set rakeback up to their own percentage
-        if (session.user.role !== "ADMIN" && session.user.role !== "MANAGER") {
-            const currentUser = await prisma.user.findUnique({ where: { id: session.user.id } });
-            if (rakeback > currentUser.rakeback) {
-                return NextResponse.json({ error: `You cannot set a rakeback higher than your own (${currentUser.rakeback}%)` }, { status: 400 });
+        // Authorization: Verify user can modify this target user
+        if (session.user.role !== "ADMIN") {
+            if (session.user.role === "MANAGER") {
+                // Manager can only modify their direct subordinates
+                if (targetUser.managerId !== session.user.id) {
+                    return NextResponse.json({ error: "You can only modify rakeback for your direct subordinates" }, { status: 403 });
+                }
+            } else {
+                // Agents and Super Agents can only modify their direct subordinates
+                if (targetUser.agentId !== session.user.id && targetUser.superAgentId !== session.user.id) {
+                    return NextResponse.json({ error: "You can only modify rakeback for your direct subordinates" }, { status: 403 });
+                }
+                // Agents can only set rakeback up to their own percentage
+                const currentUser = await prisma.user.findUnique({ where: { id: session.user.id } });
+                if (rakeback > currentUser.rakeback) {
+                    return NextResponse.json({ error: `You cannot set a rakeback higher than your own (${currentUser.rakeback}%)` }, { status: 400 });
+                }
             }
         }
 

@@ -26,7 +26,7 @@ export default function Navbar() {
     // Determine which favicon to show
     const faviconSrc = (theme === "light" || resolvedTheme === "light")
         ? "/favicon_light.ico"
-        : "/favicon.ico";
+        : "/favicon_dark.ico";
 
     const handleLogout = () => {
         signOut({ callbackUrl: "/login" });

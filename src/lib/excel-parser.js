@@ -168,6 +168,10 @@ export async function parseAndImport(buffer) {
         const parentId = u.parentCode ? codeToId.get(u.parentCode) : null;
         const saId = u.superAgentCode ? codeToId.get(u.superAgentCode) : null;
 
+        // Note: managerId is not extracted from Excel currently
+        // Managers need to be assigned manually or through a separate process
+        // The managerId field will be preserved if it already exists in the database
+        
         return prisma.user.update({
             where: { id: dbId },
             data: {
@@ -176,6 +180,7 @@ export async function parseAndImport(buffer) {
                 clubName: u.clubName,
                 agentId: (u.role === 'PLAYER' && parentId) ? parentId : undefined,
                 superAgentId: (u.role === 'AGENT' && parentId) ? parentId : (saId || undefined)
+                // managerId is not updated here - preserve existing value
             }
         });
     });
