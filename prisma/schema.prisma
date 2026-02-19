@@ -26,13 +26,17 @@ model User {
   // Hierarchy
   clubId        String?
   clubName      String?
+  managerId     String?
+  manager       User?   @relation("ManagerSubordinates", fields: [managerId], references: [id]) // Manager can have clubs, super agents, agents, and players
+  subordinates  User[]  @relation("ManagerSubordinates")
+  
   agentId       String?
   agent         User?   @relation("AgentPlayers", fields: [agentId], references: [id])
   players       User[]  @relation("AgentPlayers")
   
   superAgentId  String?
   superAgent    User?   @relation("SuperAgentItems", fields: [superAgentId], references: [id]) // Can be agents or players
-  subordinates  User[]  @relation("SuperAgentItems")
+  superAgentSubordinates  User[]  @relation("SuperAgentItems")
 
   // Financials
   balance       Float   @default(0)
