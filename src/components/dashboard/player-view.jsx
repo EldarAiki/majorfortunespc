@@ -20,6 +20,11 @@ export default function PlayerView({ user, games }) {
     const { t } = useLanguage();
     const [showDetails, setShowDetails] = useState(false);
 
+    // Calculate balance from current cycle games instead of stored value
+    const cycleBalance = games?.reduce((sum, g) => sum + (g.pnl || 0), 0) || 0;
+    const cycleRake = games?.reduce((sum, g) => sum + (g.rake || 0), 0) || 0;
+    const cycleRakeback = (cycleRake * (user.rakeback || 0)) / 100;
+
     const handleExport = async () => {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('My Games');
@@ -73,7 +78,7 @@ export default function PlayerView({ user, games }) {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
@@ -105,20 +110,32 @@ export default function PlayerView({ user, games }) {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className={`text-2xl font-bold ${user.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {user.balance?.toLocaleString()}
+                        <div className={`text-2xl font-bold ${cycleBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {cycleBalance?.toLocaleString()}
                         </div>
                     </CardContent>
                 </Card>
                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                            {t("rakeback")}
+                            Rake
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-orange-600">
+                            {cycleRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            {t("rakeback")} ({user.rakeback}%)
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold text-blue-600">
-                            {user.rakeback}%
+                            {cycleRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                     </CardContent>
                 </Card>

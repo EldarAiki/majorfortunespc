@@ -87,21 +87,25 @@ export default async function DashboardPage() {
 
                 gameSessions: {
                     where: { cycleId: currentCycleId },
-                    select: { rake: true }
+                    select: { rake: true, pnl: true }
                 }
             },
             orderBy: { code: 'asc' }
         });
 
         subPlayers = rawSubPlayers.map(p => {
+            // Calculate all values from current cycle sessions
             const totalRake = p.gameSessions.reduce((sum, gs) => sum + (gs.rake || 0), 0);
+            const totalPnL = p.gameSessions.reduce((sum, gs) => sum + (gs.pnl || 0), 0);
             const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
-            // Remove gameSessions to keep response size manageable if many users
-            const { gameSessions, ...userWithoutGames } = p;
+            
+            // Remove gameSessions and override balance with calculated cycle balance
+            const { gameSessions, balance: _storedBalance, ...userWithoutGames } = p;
             return {
                 ...userWithoutGames,
+                balance: totalPnL, // Use calculated balance from current cycle
                 totalRakebackAmount,
-                totalRake // Include total rake for calculations
+                totalRake
             };
         });
     }

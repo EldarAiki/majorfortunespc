@@ -225,33 +225,20 @@ export async function parseAndImport(buffer) {
     }
 
     // ==================================================
-    // 3. UNIFIED SESSION SAVING & BALANCE REVERT
+    // 3. UNIFIED SESSION SAVING
     // ==================================================
+    // Note: Balance is now calculated on-the-fly from current cycle sessions
+    // No need to store/update balance on User model
+    
     const allSessions = [...memberSessions, ...mttSessions];
 
-    // Revert existing sessions for this date
-    const sessionsToDelete = await prisma.gameSession.groupBy({
-        by: ['userId'],
-        where: { date: { gte: dateStart, lte: dateEnd } },
-        _sum: { pnl: true }
-    });
-
-    await runInChunks(sessionsToDelete, 50, async (group) => {
-        if (group._sum.pnl) {
-            await prisma.user.update({
-                where: { id: group.userId },
-                data: { balance: { decrement: group._sum.pnl } }
-            });
-        }
-    });
-
+    // Delete existing sessions for this date (to allow re-import)
     await prisma.gameSession.deleteMany({
         where: { date: { gte: dateStart, lte: dateEnd } }
     });
 
     // Insert new sessions
     const sessionsToInsert = [];
-    const userBalanceUpdates = {};
 
     for (const session of allSessions) {
         const dbUserId = codeToId.get(session.userCode);
@@ -267,9 +254,6 @@ export async function parseAndImport(buffer) {
                 rake: session.rake,
                 cycleId: currentCycle.id
             });
-
-            if (!userBalanceUpdates[dbUserId]) userBalanceUpdates[dbUserId] = 0;
-            userBalanceUpdates[dbUserId] += session.pnl;
         }
     }
 
@@ -277,17 +261,6 @@ export async function parseAndImport(buffer) {
         await prisma.gameSession.createMany({ data: sessionsToInsert });
         importedGames = sessionsToInsert.length;
     }
-
-    // Update balances
-    const balanceUpdatesArray = Object.entries(userBalanceUpdates).map(([userId, netPnl]) => ({ userId, netPnl }));
-    await runInChunks(balanceUpdatesArray, 50, async (item) => {
-        if (item.netPnl !== 0) {
-            await prisma.user.update({
-                where: { id: item.userId },
-                data: { balance: { increment: item.netPnl } }
-            });
-        }
-    });
 
     // Log success
     try {

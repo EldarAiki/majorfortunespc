@@ -112,7 +112,7 @@ export default function DetailsModal({ userId, isOpen, onClose, currentUser }) {
                 ) : (
                     <div className="space-y-6 mt-4">
                         {/* Summary Cards */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
                                 <p className="text-xs text-muted-foreground">{t("balance")}</p>
                                 <p className={`text-lg font-bold ${data.user.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
@@ -120,8 +120,16 @@ export default function DetailsModal({ userId, isOpen, onClose, currentUser }) {
                                 </p>
                             </div>
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
-                                <p className="text-xs text-muted-foreground">{t("rakeback")}</p>
-                                <p className="text-lg font-bold text-blue-600">{data.user.rakeback}%</p>
+                                <p className="text-xs text-muted-foreground">Rake</p>
+                                <p className="text-lg font-bold text-orange-600">
+                                    {data.user.totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                                </p>
+                            </div>
+                            <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
+                                <p className="text-xs text-muted-foreground">{t("rakeback")} ({data.user.rakeback}%)</p>
+                                <p className="text-lg font-bold text-blue-600">
+                                    {data.user.totalRakebackAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                                </p>
                             </div>
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
                                 <p className="text-xs text-muted-foreground">Role</p>
