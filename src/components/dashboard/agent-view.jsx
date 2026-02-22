@@ -97,6 +97,10 @@ export default function AgentView({ user, games, subPlayers }) {
             if (!id) return;
 
             if (!nodes.has(id)) {
+                const personalRake = u.totalRake || 0;
+                const personalRakeback = u.totalRakebackAmount || 0;
+                const personalWinning = (u.balance || 0) - personalRake + personalRakeback;
+                
                 nodes.set(id, {
                     ...u,
                     id,
@@ -104,7 +108,11 @@ export default function AgentView({ user, games, subPlayers }) {
                     children: [],
                     personalBalance: u.balance || 0,
                     groupBalance: 0,
-                    totalRake: (u.totalRakebackAmount || 0),
+                    personalRake: personalRake,
+                    groupRake: 0,
+                    totalRake: (u.totalRakebackAmount || 0), // Keep for backward compatibility (rakeback amount)
+                    personalWinning: personalWinning,
+                    groupWinning: 0,
                     rakeback: u.rakeback || 0,
                     _parentFound: false
                 });
@@ -114,7 +122,11 @@ export default function AgentView({ user, games, subPlayers }) {
                 Object.assign(existing, u);
                 if (u.role) existing.type = u.role;
                 existing.personalBalance = u.balance || 0;
-                existing.totalRake = (u.totalRakebackAmount || 0);
+                const personalRake = u.totalRake || 0;
+                const personalRakeback = u.totalRakebackAmount || 0;
+                existing.personalRake = personalRake;
+                existing.personalWinning = (u.balance || 0) - personalRake + personalRakeback;
+                existing.totalRake = personalRakeback; // Keep for backward compatibility (rakeback amount)
                 existing.rakeback = u.rakeback || 0;
             }
 
@@ -128,7 +140,11 @@ export default function AgentView({ user, games, subPlayers }) {
                     children: [],
                     personalBalance: 0,
                     groupBalance: 0,
+                    personalRake: 0,
+                    groupRake: 0,
                     totalRake: 0,
+                    personalWinning: 0,
+                    groupWinning: 0,
                     rakeback: 0,
                     managerId: null, // Will be set if any user in club has managerId
                     _parentFound: false // Clubs can be under managers
@@ -204,17 +220,21 @@ export default function AgentView({ user, games, subPlayers }) {
         // Aggregation Logic
         const aggregate = (node) => {
             let gBalance = node.personalBalance || 0;
-            let gRake = node.totalRake || 0;
+            let gRake = node.personalRake || 0;
+            let gRakeback = node.totalRake || 0; // rakeback amount (already calculated as rake * rakeback% / 100)
 
             node.children.forEach(child => {
-                const { groupBalance, totalRake } = aggregate(child);
+                const { groupBalance, groupRake, groupRakeback } = aggregate(child);
                 gBalance += groupBalance;
-                gRake += totalRake;
+                gRake += groupRake;
+                gRakeback += groupRakeback;
             });
 
             node.groupBalance = gBalance;
-            node.totalRake = gRake;
-            return { groupBalance: gBalance, totalRake: gRake };
+            node.groupRake = gRake;
+            node.totalRake = gRakeback; // Keep for backward compatibility (rakeback amount)
+            node.groupWinning = gBalance - gRake + gRakeback;
+            return { groupBalance: gBalance, groupRake: gRake, groupRakeback: gRakeback };
         };
 
         // Aggregate all root nodes (managers, clubs without managers, and orphan nodes)
@@ -293,12 +313,35 @@ export default function AgentView({ user, games, subPlayers }) {
         const hasChildren = node.children && node.children.length > 0;
         const name = node.name || node.code || "N/A";
         const isManagement = node.type !== 'PLAYER';
+        const isExpanded = expandedNodes.has(node.id);
+        const shouldShowChildren = hasChildren && isExpanded;
+
+        // Calculate values for display
+        const displayBalance = isManagement ? node.groupBalance : node.personalBalance;
+        const displayRake = isManagement ? node.groupRake : node.personalRake;
+        const displayWinning = isManagement ? node.groupWinning : node.personalWinning;
+        const displayRakeback = node.totalRake || 0; // rakeback amount
 
         return (
             <>
                 <TableRow className={`group transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${level === 0 ? 'bg-zinc-50/10 font-bold' : ''}`}>
                     <TableCell style={{ paddingLeft: `${level * 24 + 12}px` }} className="font-medium">
                         <div className="flex items-center gap-2">
+                            {hasChildren ? (
+                                <button
+                                    onClick={() => toggleNode(node.id)}
+                                    className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition-colors"
+                                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                                >
+                                    {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                    ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                    )}
+                                </button>
+                            ) : (
+                                <div className="w-6" />
+                            )}
                             {isManagement ? (
                                 <div className={`p-1.5 rounded ${node.type === 'CLUB' ? 'bg-amber-100 text-amber-700' :
                                     node.type === 'MANAGER' ? 'bg-green-100 text-green-700' :
@@ -325,24 +368,48 @@ export default function AgentView({ user, games, subPlayers }) {
                     </TableCell>
                     <TableCell className="text-right">
                         <div className="flex flex-col items-end">
-                            <span className={`font-bold tabular-nums ${(isManagement ? node.groupBalance : node.personalBalance) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            <span className={`font-bold tabular-nums ${displayBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                                 {isManagement ? (
                                     <>
-                                        Total: {node.groupBalance.toLocaleString()}
+                                        Total: {displayBalance.toLocaleString()}
                                         <span className="text-[10px] block text-muted-foreground font-normal">
                                             (Personal: {node.personalBalance.toLocaleString()})
                                         </span>
                                     </>
                                 ) : (
-                                    node.personalBalance.toLocaleString()
+                                    displayBalance.toLocaleString()
                                 )}
                             </span>
                         </div>
                     </TableCell>
                     <TableCell className="text-right">
                         <div className="flex flex-col items-end">
+                            <span className="text-orange-600 font-semibold tabular-nums">
+                                {displayRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            </span>
+                            {isManagement && (
+                                <span className="text-[10px] block text-muted-foreground font-normal">
+                                    (Personal: {node.personalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                </span>
+                            )}
+                        </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                            <span className={`font-semibold tabular-nums ${displayWinning >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {displayWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            </span>
+                            {isManagement && (
+                                <span className="text-[10px] block text-muted-foreground font-normal">
+                                    (Personal: {node.personalWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                </span>
+                            )}
+                        </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
                             <span className="text-blue-600 font-semibold tabular-nums">
-                                {node.totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                             </span>
                             <span className="text-xs text-muted-foreground font-normal">
                                 ({node.rakeback}%)
@@ -374,7 +441,7 @@ export default function AgentView({ user, games, subPlayers }) {
                         )}
                     </TableCell>
                 </TableRow>
-                {hasChildren && node.children.map(child => (
+                {shouldShowChildren && node.children.map(child => (
                     <HierarchyRow key={child.id} node={child} level={level + 1} />
                 ))}
             </>
@@ -551,6 +618,8 @@ export default function AgentView({ user, games, subPlayers }) {
                                 <TableRow className="hover:bg-transparent border-primary/10">
                                     <TableHead>User / Group</TableHead>
                                     <TableHead className="text-right">Balance</TableHead>
+                                    <TableHead className="text-right">Rake</TableHead>
+                                    <TableHead className="text-right">Winning</TableHead>
                                     <TableHead className="text-right">Rakeback</TableHead>
                                     <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
@@ -561,7 +630,7 @@ export default function AgentView({ user, games, subPlayers }) {
                                 ))}
                                 {hierarchy.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={4} className="text-center py-10 text-muted-foreground italic">
+                                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
                                             No activity found.
                                         </TableCell>
                                     </TableRow>

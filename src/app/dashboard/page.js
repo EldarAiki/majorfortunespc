@@ -100,7 +100,8 @@ export default async function DashboardPage() {
             const { gameSessions, ...userWithoutGames } = p;
             return {
                 ...userWithoutGames,
-                totalRakebackAmount
+                totalRakebackAmount,
+                totalRake // Include total rake for calculations
             };
         });
     }
