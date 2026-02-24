@@ -51,6 +51,8 @@ const dictionary = {
         details: "Details",
         download_report: "Download Report",
         search_players: "Search players...",
+        select_cycle: "Select Cycle",
+        active: "Active",
     },
     he: {
         // Navbar
@@ -100,6 +102,8 @@ const dictionary = {
         details: "פרטים",
         download_report: "הורד דוח",
         search_players: "חפש שחקנים...",
+        select_cycle: "בחר מחזור",
+        active: "פעיל",
     },
 };
 

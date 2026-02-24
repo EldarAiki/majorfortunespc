@@ -16,7 +16,15 @@ import { Download, Search, Settings2, Eye, RefreshCw, ChevronRight, ChevronDown,
 import PlayerView from "./player-view";
 import { useLanguage } from "@/lib/i18n";
 import ExcelJS from "exceljs";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
     Dialog,
     DialogContent,
@@ -49,6 +57,26 @@ export default function AgentView({ user, games, subPlayers }) {
     };
 
     const [activitySearchTerm, setActivitySearchTerm] = useState("");
+    const [cycles, setCycles] = useState([]);
+    const [cyclesLoading, setCyclesLoading] = useState(false);
+
+    useEffect(() => {
+        const fetchCycles = async () => {
+            setCyclesLoading(true);
+            try {
+                const res = await fetch("/api/cycles");
+                const data = await res.json();
+                if (data.cycles) {
+                    setCycles(data.cycles);
+                }
+            } catch (error) {
+                console.error("Failed to fetch cycles:", error);
+            } finally {
+                setCyclesLoading(false);
+            }
+        };
+        fetchCycles();
+    }, []);
 
     const handleUpdateRakeback = async () => {
         if (!selectedPlayer || newRakeback === "") return;
@@ -455,7 +483,7 @@ export default function AgentView({ user, games, subPlayers }) {
     };
 
 
-    const handleDownloadReport = async () => {
+    const handleDownloadCurrentCycle = async () => {
         const workbook = new ExcelJS.Workbook();
         const sheet = workbook.addWorksheet('My Group');
 
@@ -482,9 +510,185 @@ export default function AgentView({ user, games, subPlayers }) {
         const url = window.URL.createObjectURL(blob);
         const anchor = document.createElement("a");
         anchor.href = url;
-        anchor.download = `Group_Report_${user.code}.xlsx`;
+        anchor.download = `Group_Report_${user.code}_Current.xlsx`;
         anchor.click();
         window.URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadCycleReport = async (cycle) => {
+        try {
+            const res = await fetch(`/api/cycles/${cycle.id}/report`);
+            const data = await res.json();
+
+            if (!data.players) {
+                alert("Failed to fetch cycle data");
+                return;
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const cycleDateStr = new Date(cycle.startDate).toLocaleDateString();
+            const sheet = workbook.addWorksheet('My Group');
+
+            sheet.columns = [
+                { header: t('code'), key: 'code', width: 15 },
+                { header: 'Name', key: 'name', width: 25 },
+                { header: 'Role', key: 'role', width: 15 },
+                { header: t('balance'), key: 'balance', width: 15 },
+                { header: t('rakeback'), key: 'rakeback', width: 15 },
+            ];
+
+            data.players.forEach(p => {
+                sheet.addRow({
+                    code: p.code,
+                    name: p.name,
+                    role: p.role,
+                    balance: p.balance,
+                    rakeback: p.rakeback + '%'
+                });
+            });
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `Group_Report_${user.code}_${cycleDateStr.replace(/\//g, '-')}.xlsx`;
+            anchor.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Failed to download cycle report:", error);
+            alert("Failed to download cycle report");
+        }
+    };
+
+    const formatCycleDate = (cycle) => {
+        const start = new Date(cycle.startDate).toLocaleDateString();
+        const end = cycle.endDate ? new Date(cycle.endDate).toLocaleDateString() : t("current_cycle") || "Current";
+        return cycle.status === "OPEN" ? `${start} - ${end}` : `${start} - ${end}`;
+    };
+
+    const flattenHierarchy = (nodes, level = 0, result = []) => {
+        nodes.forEach(node => {
+            const isManagement = node.type !== 'PLAYER';
+            const displayBalance = isManagement ? node.groupBalance : node.personalBalance;
+            const displayRake = isManagement ? node.groupRake : node.personalRake;
+            const displayWinning = isManagement ? node.groupWinning : node.personalWinning;
+            const displayRakeback = node.totalRake || 0;
+
+            result.push({
+                level,
+                name: node.name || node.code || "N/A",
+                code: node.code || "",
+                type: node.type,
+                balance: displayBalance,
+                rake: displayRake,
+                winning: displayWinning,
+                rakeback: displayRakeback,
+                rakebackPercent: node.rakeback || 0,
+            });
+
+            if (node.children && node.children.length > 0) {
+                flattenHierarchy(node.children, level + 1, result);
+            }
+        });
+        return result;
+    };
+
+    const handleDownloadActivityCurrentCycle = async () => {
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Club Activity');
+
+        sheet.columns = [
+            { header: 'User / Group', key: 'name', width: 30 },
+            { header: t('code'), key: 'code', width: 15 },
+            { header: 'Type', key: 'type', width: 15 },
+            { header: t('balance'), key: 'balance', width: 15 },
+            { header: 'Rake', key: 'rake', width: 15 },
+            { header: 'Winning', key: 'winning', width: 15 },
+            { header: t('rakeback'), key: 'rakeback', width: 15 },
+            { header: 'Rakeback %', key: 'rakebackPercent', width: 12 },
+        ];
+
+        const flatData = flattenHierarchy(hierarchy);
+        flatData.forEach(row => {
+            const indent = '  '.repeat(row.level);
+            sheet.addRow({
+                name: indent + row.name,
+                code: row.code,
+                type: row.type,
+                balance: row.balance,
+                rake: row.rake,
+                winning: row.winning,
+                rakeback: row.rakeback,
+                rakebackPercent: row.rakebackPercent + '%',
+            });
+        });
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `Activity_Report_${user.code}_Current.xlsx`;
+        anchor.click();
+        window.URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadActivityCycleReport = async (cycle) => {
+        try {
+            const res = await fetch(`/api/cycles/${cycle.id}/activity`);
+            const data = await res.json();
+
+            if (!data.players) {
+                alert("Failed to fetch cycle data");
+                return;
+            }
+
+            const workbook = new ExcelJS.Workbook();
+            const cycleDateStr = new Date(cycle.startDate).toLocaleDateString();
+            const sheet = workbook.addWorksheet('Club Activity');
+
+            sheet.columns = [
+                { header: 'User / Group', key: 'name', width: 30 },
+                { header: t('code'), key: 'code', width: 15 },
+                { header: 'Type', key: 'type', width: 15 },
+                { header: t('balance'), key: 'balance', width: 15 },
+                { header: 'Rake', key: 'rake', width: 15 },
+                { header: 'Winning', key: 'winning', width: 15 },
+                { header: t('rakeback'), key: 'rakeback', width: 15 },
+                { header: 'Rakeback %', key: 'rakebackPercent', width: 12 },
+            ];
+
+            data.players.forEach(p => {
+                const totalRake = p.totalRake || 0;
+                const totalRakebackAmount = p.totalRakebackAmount || 0;
+                const balance = p.balance || 0;
+                const winning = balance - totalRake + totalRakebackAmount;
+
+                sheet.addRow({
+                    name: p.name || p.code || "N/A",
+                    code: p.code,
+                    type: p.role,
+                    balance: balance,
+                    rake: totalRake,
+                    winning: winning,
+                    rakeback: totalRakebackAmount,
+                    rakebackPercent: (p.rakeback || 0) + '%',
+                });
+            });
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+            const url = window.URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `Activity_Report_${user.code}_${cycleDateStr.replace(/\//g, '-')}.xlsx`;
+            anchor.click();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Failed to download cycle activity report:", error);
+            alert("Failed to download cycle activity report");
+        }
     };
 
     return (
@@ -516,10 +720,51 @@ export default function AgentView({ user, games, subPlayers }) {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <Button onClick={handleDownloadReport} className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
-                        <Download className="h-4 w-4" />
-                        {t("download_report")}
-                    </Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
+                                <Download className="h-4 w-4" />
+                                {t("download_report")}
+                                <ChevronDown className="h-4 w-4 ml-1" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-64">
+                            <DropdownMenuLabel>{t("select_cycle") || "Select Cycle"}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {cycles.length === 0 && cyclesLoading && (
+                                <DropdownMenuItem disabled>
+                                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                    Loading...
+                                </DropdownMenuItem>
+                            )}
+                            {cycles.map((cycle, index) => (
+                                <DropdownMenuItem
+                                    key={cycle.id}
+                                    onClick={() => cycle.status === "OPEN" ? handleDownloadCurrentCycle() : handleDownloadCycleReport(cycle)}
+                                    className="cursor-pointer"
+                                >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    <span className="flex-1">
+                                        {cycle.status === "OPEN" ? (
+                                            <span className="font-medium">{t("current_cycle") || "Current Cycle"}</span>
+                                        ) : (
+                                            formatCycleDate(cycle)
+                                        )}
+                                    </span>
+                                    {cycle.status === "OPEN" && (
+                                        <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                            {t("active") || "Active"}
+                                        </span>
+                                    )}
+                                </DropdownMenuItem>
+                            ))}
+                            {cycles.length === 0 && !cyclesLoading && (
+                                <DropdownMenuItem disabled>
+                                    No cycles available
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
 
                 <Card className="border-none shadow-lg">
@@ -606,6 +851,51 @@ export default function AgentView({ user, games, subPlayers }) {
                             onChange={(e) => setActivitySearchTerm(e.target.value)}
                         />
                     </div>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
+                                <Download className="h-4 w-4" />
+                                {t("download_report")}
+                                <ChevronDown className="h-4 w-4 ml-1" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-64">
+                            <DropdownMenuLabel>{t("select_cycle") || "Select Cycle"}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {cycles.length === 0 && cyclesLoading && (
+                                <DropdownMenuItem disabled>
+                                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                    Loading...
+                                </DropdownMenuItem>
+                            )}
+                            {cycles.map((cycle) => (
+                                <DropdownMenuItem
+                                    key={cycle.id}
+                                    onClick={() => cycle.status === "OPEN" ? handleDownloadActivityCurrentCycle() : handleDownloadActivityCycleReport(cycle)}
+                                    className="cursor-pointer"
+                                >
+                                    <Download className="h-4 w-4 mr-2" />
+                                    <span className="flex-1">
+                                        {cycle.status === "OPEN" ? (
+                                            <span className="font-medium">{t("current_cycle") || "Current Cycle"}</span>
+                                        ) : (
+                                            formatCycleDate(cycle)
+                                        )}
+                                    </span>
+                                    {cycle.status === "OPEN" && (
+                                        <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                            {t("active") || "Active"}
+                                        </span>
+                                    )}
+                                </DropdownMenuItem>
+                            ))}
+                            {cycles.length === 0 && !cyclesLoading && (
+                                <DropdownMenuItem disabled>
+                                    No cycles available
+                                </DropdownMenuItem>
+                            )}
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
 
                 <Card className="border-none shadow-lg">
