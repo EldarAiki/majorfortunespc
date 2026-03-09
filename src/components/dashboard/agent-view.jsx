@@ -436,7 +436,7 @@ export default function AgentView({ user, games, subPlayers }) {
                     </TableCell>
                     <TableCell className="text-right">
                         <div className="flex flex-col items-end">
-                            <span className="text-blue-600 font-semibold tabular-nums">
+                            <span className="text-green-600 font-semibold tabular-nums">
                                 {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                             </span>
                             <span className="text-xs text-muted-foreground font-normal">
@@ -801,7 +801,7 @@ export default function AgentView({ user, games, subPlayers }) {
                                         <TableCell className={`text-right font-bold ${player.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                                             {player.balance?.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right text-blue-600 font-semibold">{player.rakeback}%</TableCell>
+                                        <TableCell className="text-right text-green-600 font-semibold">{player.rakeback}%</TableCell>
                                         <TableCell className="text-right flex justify-end gap-2">
                                             <Button
                                                 variant="ghost"
