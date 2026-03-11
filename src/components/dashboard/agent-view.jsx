@@ -127,8 +127,9 @@ export default function AgentView({ user, games, subPlayers }) {
             if (!nodes.has(id)) {
                 const personalRake = u.totalRake || 0;
                 const personalRakeback = u.totalRakebackAmount || 0;
-                const personalWinning = (u.balance || 0) - personalRake + personalRakeback;
-                
+                // Balance = winnings + rakeback; Winning = winnings (totalPnL)
+                const personalWinning = u.totalWinnings ?? (u.balance != null ? (u.balance || 0) - (personalRakeback || 0) : 0);
+
                 nodes.set(id, {
                     ...u,
                     id,
@@ -138,14 +139,13 @@ export default function AgentView({ user, games, subPlayers }) {
                     groupBalance: 0,
                     personalRake: personalRake,
                     groupRake: 0,
-                    totalRake: (u.totalRakebackAmount || 0), // Keep for backward compatibility (rakeback amount)
+                    totalRake: (u.totalRakebackAmount || 0),
                     personalWinning: personalWinning,
                     groupWinning: 0,
                     rakeback: u.rakeback || 0,
                     _parentFound: false
                 });
             } else {
-                // Update existing placeholder with actual data
                 const existing = nodes.get(id);
                 Object.assign(existing, u);
                 if (u.role) existing.type = u.role;
@@ -153,8 +153,8 @@ export default function AgentView({ user, games, subPlayers }) {
                 const personalRake = u.totalRake || 0;
                 const personalRakeback = u.totalRakebackAmount || 0;
                 existing.personalRake = personalRake;
-                existing.personalWinning = (u.balance || 0) - personalRake + personalRakeback;
-                existing.totalRake = personalRakeback; // Keep for backward compatibility (rakeback amount)
+                existing.personalWinning = u.totalWinnings ?? (u.balance != null ? (u.balance || 0) - (personalRakeback || 0) : 0);
+                existing.totalRake = personalRakeback;
                 existing.rakeback = u.rakeback || 0;
             }
 
@@ -245,24 +245,26 @@ export default function AgentView({ user, games, subPlayers }) {
             }
         });
 
-        // Aggregation Logic
+        // Aggregation Logic: Balance = winnings+rakeback, Winning = winnings (totalPnL)
         const aggregate = (node) => {
             let gBalance = node.personalBalance || 0;
             let gRake = node.personalRake || 0;
-            let gRakeback = node.totalRake || 0; // rakeback amount (already calculated as rake * rakeback% / 100)
+            let gRakeback = node.totalRake || 0;
+            let gWinning = node.personalWinning || 0;
 
             node.children.forEach(child => {
-                const { groupBalance, groupRake, groupRakeback } = aggregate(child);
-                gBalance += groupBalance;
-                gRake += groupRake;
-                gRakeback += groupRakeback;
+                const sub = aggregate(child);
+                gBalance += sub.groupBalance;
+                gRake += sub.groupRake;
+                gRakeback += sub.groupRakeback;
+                gWinning += sub.groupWinning;
             });
 
             node.groupBalance = gBalance;
             node.groupRake = gRake;
-            node.totalRake = gRakeback; // Keep for backward compatibility (rakeback amount)
-            node.groupWinning = gBalance - gRake + gRakeback;
-            return { groupBalance: gBalance, groupRake: gRake, groupRakeback: gRakeback };
+            node.totalRake = gRakeback;
+            node.groupWinning = gWinning;
+            return { groupBalance: gBalance, groupRake: gRake, groupRakeback: gRakeback, groupWinning: gWinning };
         };
 
         // Aggregate all root nodes (managers, clubs without managers, and orphan nodes)
@@ -412,7 +414,7 @@ export default function AgentView({ user, games, subPlayers }) {
                     </TableCell>
                     <TableCell className="text-right">
                         <div className="flex flex-col items-end">
-                            <span className="text-orange-600 font-semibold tabular-nums">
+                            <span className="text-red-600 font-semibold tabular-nums">
                                 {displayRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                             </span>
                             {isManagement && (
@@ -663,7 +665,7 @@ export default function AgentView({ user, games, subPlayers }) {
                 const totalRake = p.totalRake || 0;
                 const totalRakebackAmount = p.totalRakebackAmount || 0;
                 const balance = p.balance || 0;
-                const winning = balance - totalRake + totalRakebackAmount;
+                const winning = (p.totalWinnings != null ? p.totalWinnings : balance - totalRakebackAmount);
 
                 sheet.addRow({
                     name: p.name || p.code || "N/A",

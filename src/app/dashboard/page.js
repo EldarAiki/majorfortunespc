@@ -34,7 +34,7 @@ export default async function DashboardPage() {
 
     const currentCycleId = currentCycle?.id;
 
-    // Fetch games for the user (Current Cycle)
+    // Fetch games for the user (Current Cycle); ring sessions for table, MTT for totals
     const games = await prisma.gameSession.findMany({
         where: {
             userId: user.id,
@@ -43,6 +43,24 @@ export default async function DashboardPage() {
         orderBy: { date: 'desc' },
         take: 50,
     });
+
+    // Winnings/rake for current user: ring totals + MTT sessions
+    let totalWinnings = 0;
+    let totalRake = 0;
+    if (currentCycleId) {
+        const ringTotals = await prisma.playerRingTotal.findMany({
+            where: { userId: user.id, cycleId: currentCycleId },
+            select: { totalPnl: true, totalRake: true },
+        });
+        totalWinnings = ringTotals.reduce((s, r) => s + (r.totalPnl || 0), 0);
+        totalRake = ringTotals.reduce((s, r) => s + (r.totalRake || 0), 0);
+        games.forEach((g) => {
+            if (g.gameType === 'MTT') {
+                totalWinnings += g.pnl || 0;
+                totalRake += g.rake || 0;
+            }
+        });
+    }
 
     // Role Based Data Fetching
     let subPlayers = [];
@@ -84,38 +102,42 @@ export default async function DashboardPage() {
                 agent: { select: { name: true, code: true } },
                 superAgent: { select: { name: true, code: true } },
                 manager: { select: { name: true, code: true } },
-
                 gameSessions: {
                     where: { cycleId: currentCycleId },
-                    select: { rake: true, pnl: true }
+                    select: { rake: true, pnl: true, gameType: true }
+                },
+                playerRingTotals: {
+                    where: { cycleId: currentCycleId },
+                    select: { totalPnl: true, totalRake: true }
                 }
             },
             orderBy: { code: 'asc' }
         });
 
         subPlayers = rawSubPlayers.map(p => {
-            // Calculate all values from current cycle sessions
-            const totalRake = p.gameSessions.reduce((sum, gs) => sum + (gs.rake || 0), 0);
-            const totalPnL = p.gameSessions.reduce((sum, gs) => sum + (gs.pnl || 0), 0);
+            const ringPnl = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalPnl || 0), 0);
+            const ringRake = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalRake || 0), 0);
+            const mttPnl = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.pnl || 0), 0);
+            const mttRake = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.rake || 0), 0);
+            const totalPnL = ringPnl + mttPnl;
+            const totalRake = ringRake + mttRake;
             const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
-            
-            // Remove gameSessions and override balance with calculated cycle balance
-            const { gameSessions, balance: _storedBalance, ...userWithoutGames } = p;
+            const { gameSessions, playerRingTotals, balance: _storedBalance, ...rest } = p;
             return {
-                ...userWithoutGames,
-                balance: totalPnL, // Use calculated balance from current cycle
+                ...rest,
+                balance: totalPnL + totalRakebackAmount, // balance = winnings + rakeback
+                totalWinnings: totalPnL,
                 totalRakebackAmount,
                 totalRake
             };
         });
     }
 
-    // Render View
     if (user.role === "ADMIN") {
         return <AdminView user={user} games={games} subPlayers={subPlayers} />;
     } else if (["MANAGER", "SUPER_AGENT", "AGENT"].includes(user.role)) {
         return <AgentView user={user} games={games} subPlayers={subPlayers} />;
     } else {
-        return <PlayerView user={user} games={games} />;
+        return <PlayerView user={user} games={games} totalWinnings={totalWinnings} totalRake={totalRake} />;
     }
 }

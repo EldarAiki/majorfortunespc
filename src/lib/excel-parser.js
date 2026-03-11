@@ -33,6 +33,19 @@ const MTT_COLS = {
     PNL: 17,              // P&L
 };
 
+/**
+ * Column mappings for Union Ring Game Detail sheet.
+ * Layout: Row 3 = "Table Name : ...", Rows 5–6 = headers (Club, Player, Buy-in, Cashout), Row 7+ = data.
+ * Data columns: 3 = Player ID, 4 = Nickname, 5 = Buy-in, 6 = Cashout, 7 = Hands.
+ */
+const RING_COLS = {
+    MEMBER_ID: 3,   // Player ID (player code)
+    NICKNAME: 4,    // Skip "Total" rows when this is "Total"
+    BUYIN: 5,
+    CASHOUT: 6,
+    HANDS: 7,
+};
+
 const DATA_START_ROW = 7; // First data row in Member Statistics
 const MTT_DATA_START_ROW = 8; // First data row in MTT Detail
 
@@ -102,25 +115,21 @@ function extractDateFromSheet(sheet) {
 }
 
 /**
- * Parse Union Member Statistics sheet
- * Returns: { users: Map<code, userData>, sessions: Array<sessionData> }
+ * Parse Union Member Statistics sheet.
+ * Returns users and ring-game totals only (no sessions). Totals are used for cycle winnings/rake.
  */
 function parseMemberStatistics(sheet) {
     const users = new Map();
-    const sessions = [];
+    const ringTotals = [];
     let currentClub = null;
 
     sheet.eachRow((row, rowNumber) => {
         if (rowNumber < DATA_START_ROW) return;
         if (isTotalRow(row)) return;
 
-        // Check for club info in column 1
         const clubInfo = parseClubInfo(row.getCell(MEMBER_COLS.CLUB).value);
-        if (clubInfo) {
-            currentClub = clubInfo;
-        }
+        if (clubInfo) currentClub = clubInfo;
 
-        // Extract user identifiers
         const superAgentId = getString(row, MEMBER_COLS.SUPER_AGENT_ID);
         const superAgentName = getString(row, MEMBER_COLS.SUPER_AGENT_NAME);
         const agentId = getString(row, MEMBER_COLS.AGENT_ID);
@@ -128,7 +137,6 @@ function parseMemberStatistics(sheet) {
         const memberId = getString(row, MEMBER_COLS.MEMBER_ID);
         const memberName = getString(row, MEMBER_COLS.MEMBER_NAME);
 
-        // Register Super Agent
         if (superAgentId && !users.has(superAgentId)) {
             users.set(superAgentId, {
                 code: superAgentId,
@@ -141,7 +149,6 @@ function parseMemberStatistics(sheet) {
             });
         }
 
-        // Register Agent
         if (agentId && !users.has(agentId)) {
             users.set(agentId, {
                 code: agentId,
@@ -154,9 +161,7 @@ function parseMemberStatistics(sheet) {
             });
         }
 
-        // Register Member (Player)
         if (memberId) {
-            // Update or create member entry
             const existing = users.get(memberId);
             if (!existing || currentClub) {
                 users.set(memberId, {
@@ -170,23 +175,59 @@ function parseMemberStatistics(sheet) {
                 });
             }
 
-            // Extract session data (Total P&L and Total Rake)
             const totalPnl = getNumber(row, MEMBER_COLS.TOTAL_PNL);
             const totalRake = getNumber(row, MEMBER_COLS.TOTAL_RAKE);
-
             if (totalPnl !== 0 || totalRake !== 0) {
-                sessions.push({
-                    userCode: memberId,
-                    pnl: totalPnl,
-                    rake: totalRake,
-                    tableName: 'Cash Games',
-                    hands: 0,
-                });
+                ringTotals.push({ userCode: memberId, totalPnl, totalRake });
             }
         }
     });
 
-    return { users, sessions };
+    return { users, ringTotals };
+}
+
+/**
+ * Parse Union Ring Game Detail sheet.
+ * Structure: repeated blocks of "Table Name" row (row 3, 12, …), "Table Information", two header rows, data rows, "Total" row.
+ * Returns session rows: date and table name from header, buy-in and cash-out per row.
+ */
+function parseRingGameDetail(sheet, sessionDate) {
+    if (!sheet) return [];
+    const sessions = [];
+    let currentTableName = 'Ring Game';
+
+    sheet.eachRow((row) => {
+        const col1 = String(row.getCell(1).value || '').trim();
+        const memberId = getString(row, RING_COLS.MEMBER_ID);
+        const nickname = getString(row, RING_COLS.NICKNAME);
+
+        if (col1.includes('Table Name')) {
+            const match = col1.match(/Table Name\s*:\s*([^,]+)/i);
+            if (match) currentTableName = match[1].trim();
+            return;
+        }
+        if (col1.includes('Table Information') || col1.includes('Start/End Time')) return;
+        if (memberId === 'Player' || memberId === 'ID' || getString(row, RING_COLS.BUYIN) === 'Buy-in') return;
+        if (!memberId || memberId === '-' || nickname?.toLowerCase() === 'total' || memberId === 'Total') return;
+
+        const buyIn = getNumber(row, RING_COLS.BUYIN);
+        const cashOut = getNumber(row, RING_COLS.CASHOUT);
+        const hands = Math.floor(getNumber(row, RING_COLS.HANDS));
+        const pnl = cashOut - buyIn;
+
+        sessions.push({
+            userCode: memberId,
+            date: sessionDate,
+            tableName: currentTableName,
+            buyIn,
+            cashOut,
+            pnl,
+            rake: 0,
+            hands,
+        });
+    });
+
+    return sessions;
 }
 
 /**
@@ -243,6 +284,9 @@ function parseMTTDetail(sheet) {
     return sessions;
 }
 
+const GAME_TYPE_RING = 'RING';
+const GAME_TYPE_MTT = 'MTT';
+
 /**
  * Batch database operations in chunks to prevent connection pool exhaustion
  */
@@ -263,22 +307,20 @@ export async function parseAndImport(buffer) {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
 
-    // Get required sheets
     const memberSheet = workbook.getWorksheet('Union Member Statistics');
+    const ringSheet = workbook.getWorksheet('Union Ring Game Detail');
     const mttSheet = workbook.getWorksheet('Union MTT Detail');
 
     if (!memberSheet) {
         throw new Error("Sheet 'Union Member Statistics' not found.");
     }
 
-    // Extract session date from sheet
     const sessionDate = extractDateFromSheet(memberSheet);
     const dateStart = new Date(sessionDate);
     dateStart.setHours(0, 0, 0, 0);
     const dateEnd = new Date(sessionDate);
     dateEnd.setHours(23, 59, 59, 999);
 
-    // Ensure current cycle exists
     let currentCycle = await prisma.cycle.findFirst({
         where: { status: 'OPEN' },
         orderBy: { startDate: 'desc' }
@@ -293,9 +335,9 @@ export async function parseAndImport(buffer) {
     // ========================================
     // 1. Parse Excel Data
     // ========================================
-    const { users, sessions: memberSessions } = parseMemberStatistics(memberSheet);
+    const { users, ringTotals } = parseMemberStatistics(memberSheet);
+    const ringSessions = parseRingGameDetail(ringSheet, sessionDate);
     const mttSessions = parseMTTDetail(mttSheet);
-    const allSessions = [...memberSessions, ...mttSessions];
 
     // ========================================
     // 2. Sync Users to Database
@@ -367,39 +409,82 @@ export async function parseAndImport(buffer) {
     await batchOperation(userUpdates, 50, p => p);
 
     // ========================================
-    // 3. Save Game Sessions
+    // 3. Save Ring Totals (from Union Member Statistics)
     // ========================================
-    
-    // Delete existing sessions for this date (allows re-import)
+    await prisma.playerRingTotal.deleteMany({
+        where: {
+            cycleId: currentCycle.id,
+            periodDate: { gte: dateStart, lte: dateEnd }
+        }
+    });
+
+    const ringTotalsToInsert = ringTotals
+        .filter(r => codeToId.has(r.userCode))
+        .map(r => ({
+            userId: codeToId.get(r.userCode),
+            cycleId: currentCycle.id,
+            periodDate: sessionDate,
+            totalPnl: r.totalPnl,
+            totalRake: r.totalRake,
+        }));
+
+    if (ringTotalsToInsert.length > 0) {
+        await prisma.playerRingTotal.createMany({ data: ringTotalsToInsert });
+    }
+
+    // ========================================
+    // 4. Save Game Sessions (Ring from Union Ring Game Detail, MTT from Union MTT Detail)
+    // Only remove sessions for this cycle + date so re-upload replaces this period; closed cycles are untouched.
+    // ========================================
     await prisma.gameSession.deleteMany({
         where: {
+            cycleId: currentCycle.id,
             date: { gte: dateStart, lte: dateEnd }
         }
     });
 
-    // Prepare sessions for insert
-    const sessionsToInsert = allSessions
-        .filter(session => codeToId.has(session.userCode))
-        .map(session => ({
-            userId: codeToId.get(session.userCode),
+    const ringSessionsToInsert = ringSessions
+        .filter(s => codeToId.has(s.userCode))
+        .map(s => ({
+            userId: codeToId.get(s.userCode),
+            date: s.date,
+            tableName: s.tableName,
+            gameType: GAME_TYPE_RING,
+            buyIn: s.buyIn,
+            cashOut: s.cashOut,
+            pnl: s.pnl,
+            rake: s.rake,
+            hands: s.hands,
+            cycleId: currentCycle.id,
+        }));
+
+    const mttSessionsToInsert = mttSessions
+        .filter(s => codeToId.has(s.userCode))
+        .map(s => ({
+            userId: codeToId.get(s.userCode),
             date: sessionDate,
-            tableName: session.tableName,
+            tableName: s.tableName,
+            gameType: GAME_TYPE_MTT,
             buyIn: 0,
             cashOut: 0,
-            pnl: session.pnl,
-            rake: session.rake,
-            hands: session.hands,
+            pnl: s.pnl,
+            rake: s.rake,
+            hands: s.hands,
             cycleId: currentCycle.id,
         }));
 
     let importedGames = 0;
-    if (sessionsToInsert.length > 0) {
-        await prisma.gameSession.createMany({ data: sessionsToInsert });
-        importedGames = sessionsToInsert.length;
+    if (ringSessionsToInsert.length > 0) {
+        await prisma.gameSession.createMany({ data: ringSessionsToInsert });
+        importedGames += ringSessionsToInsert.length;
+    }
+    if (mttSessionsToInsert.length > 0) {
+        await prisma.gameSession.createMany({ data: mttSessionsToInsert });
+        importedGames += mttSessionsToInsert.length;
     }
 
     // ========================================
-    // 4. Log Import
+    // 5. Log Import
     // ========================================
     try {
         await prisma.importLog.create({

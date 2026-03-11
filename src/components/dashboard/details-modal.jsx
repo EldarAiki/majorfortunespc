@@ -121,7 +121,7 @@ export default function DetailsModal({ userId, isOpen, onClose, currentUser }) {
                             </div>
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
                                 <p className="text-xs text-muted-foreground">Rake</p>
-                                <p className="text-lg font-bold text-orange-600">
+                                <p className="text-lg font-bold text-red-600">
                                     {data.user.totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
                                 </p>
                             </div>

@@ -16,14 +16,14 @@ import ExcelJS from "exceljs";
 import { useState } from "react";
 import DetailsModal from "./details-modal";
 
-export default function PlayerView({ user, games }) {
+export default function PlayerView({ user, games, totalWinnings = 0, totalRake = 0 }) {
     const { t } = useLanguage();
     const [showDetails, setShowDetails] = useState(false);
 
-    // Calculate balance from current cycle games instead of stored value
-    const cycleBalance = games?.reduce((sum, g) => sum + (g.pnl || 0), 0) || 0;
-    const cycleRake = games?.reduce((sum, g) => sum + (g.rake || 0), 0) || 0;
-    const cycleRakeback = (cycleRake * (user.rakeback || 0)) / 100;
+    // Balance = winnings + rakeback (not winnings - rake)
+    const cycleRakeback = (totalRake * (user.rakeback || 0)) / 100;
+    const cycleBalance = totalWinnings + cycleRakeback;
+    const cycleWinnings = totalWinnings;
 
     const handleExport = async () => {
         const workbook = new ExcelJS.Workbook();
@@ -37,7 +37,7 @@ export default function PlayerView({ user, games }) {
             { header: t('pnl'), key: 'pnl', width: 15 },
         ];
 
-        games?.forEach(game => {
+        (games?.filter((g) => g.gameType === "RING") ?? []).forEach((game) => {
             sheet.addRow({
                 date: new Date(game.date).toLocaleDateString(),
                 table: game.tableName,
@@ -113,6 +113,19 @@ export default function PlayerView({ user, games }) {
                         <div className={`text-2xl font-bold ${cycleBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                             {cycleBalance?.toLocaleString()}
                         </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">Winnings + Rakeback</p>
+                    </CardContent>
+                </Card>
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            Winnings
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className={`text-2xl font-bold ${cycleWinnings >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {cycleWinnings?.toLocaleString()}
+                        </div>
                     </CardContent>
                 </Card>
                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
@@ -122,8 +135,8 @@ export default function PlayerView({ user, games }) {
                         </CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-orange-600">
-                            {cycleRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <div className="text-2xl font-bold text-red-600">
+                            {totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                     </CardContent>
                 </Card>
@@ -144,6 +157,7 @@ export default function PlayerView({ user, games }) {
             <Card className="border-none shadow-lg">
                 <CardHeader>
                     <CardTitle>{t("recent_games")}</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">Ring game sessions only</p>
                 </CardHeader>
                 <CardContent>
                     <Table>
@@ -157,14 +171,16 @@ export default function PlayerView({ user, games }) {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {!games || games.length === 0 ? (
+                            {(() => {
+                                const ringGames = games?.filter((g) => g.gameType === "RING") ?? [];
+                                return !ringGames.length ? (
                                 <TableRow>
                                     <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
-                                        No recent games found.
+                                        No ring game sessions found.
                                     </TableCell>
                                 </TableRow>
                             ) : (
-                                games.map((game) => (
+                                ringGames.map((game) => (
                                     <TableRow key={game.id} className="group transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                                         <TableCell className="font-medium">
                                             {new Date(game.date).toLocaleDateString()}
@@ -176,8 +192,8 @@ export default function PlayerView({ user, games }) {
                                             {game.pnl >= 0 ? '+' : ''}{game.pnl?.toLocaleString()}
                                         </TableCell>
                                     </TableRow>
-                                ))
-                            )}
+                                ));
+                            })()}
                         </TableBody>
                     </Table>
                 </CardContent>

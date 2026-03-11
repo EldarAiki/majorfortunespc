@@ -28,7 +28,11 @@ export async function GET(req, { params }) {
             include: {
                 gameSessions: {
                     where: { cycleId: currentCycleId },
-                    select: { pnl: true, rake: true }
+                    select: { pnl: true, rake: true, gameType: true }
+                },
+                playerRingTotals: {
+                    where: { cycleId: currentCycleId },
+                    select: { totalPnl: true, totalRake: true }
                 }
             }
         });
@@ -37,29 +41,28 @@ export async function GET(req, { params }) {
             return NextResponse.json({ error: "User not found" }, { status: 404 });
         }
 
-        // Calculate balance and rake from current cycle sessions
-        const userTotalPnL = targetUser.gameSessions.reduce((sum, gs) => sum + (gs.pnl || 0), 0);
-        const userTotalRake = targetUser.gameSessions.reduce((sum, gs) => sum + (gs.rake || 0), 0);
+        const ringPnl = (targetUser.playerRingTotals || []).reduce((s, r) => s + (r.totalPnl || 0), 0);
+        const ringRake = (targetUser.playerRingTotals || []).reduce((s, r) => s + (r.totalRake || 0), 0);
+        const mttPnl = (targetUser.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.pnl || 0), 0);
+        const mttRake = (targetUser.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.rake || 0), 0);
+        const userTotalPnL = ringPnl + mttPnl;
+        const userTotalRake = ringRake + mttRake;
         const userRakebackAmount = (userTotalRake * (targetUser.rakeback || 0)) / 100;
 
-        // Authorization check
         if (session.user.role !== "MANAGER" && session.user.role !== "ADMIN") {
-            // Check if user is downstream
-            if (targetUser.agentId !== session.user.id && 
-                targetUser.superAgentId !== session.user.id && 
+            if (targetUser.agentId !== session.user.id &&
+                targetUser.superAgentId !== session.user.id &&
                 targetUser.managerId !== session.user.id &&
                 targetUser.id !== session.user.id) {
-                // Additional check: maybe the targetUser is a player of one of this superAgent's agents
-                // But for now, let's allow it if they are in the same hierarchy
-                // (In a real app, you'd crawl up the tree to verify)
+                // hierarchy check as needed
             }
         }
 
-        // Prepare user object with calculated balance
-        const { gameSessions: _gs, ...userWithoutSessions } = targetUser;
+        const { gameSessions: _gs, playerRingTotals: _prt, ...userWithoutSessions } = targetUser;
         const userWithCalculatedBalance = {
             ...userWithoutSessions,
-            balance: userTotalPnL, // Override with calculated balance
+            balance: userTotalPnL + userRakebackAmount, // balance = winnings + rakeback
+            totalWinnings: userTotalPnL,
             totalRake: userTotalRake,
             totalRakebackAmount: userRakebackAmount
         };
@@ -78,7 +81,11 @@ export async function GET(req, { params }) {
                 include: {
                     gameSessions: {
                         where: { cycleId: currentCycleId },
-                        select: { pnl: true, rake: true }
+                        select: { pnl: true, rake: true, gameType: true }
+                    },
+                    playerRingTotals: {
+                        where: { cycleId: currentCycleId },
+                        select: { totalPnl: true, totalRake: true }
                     }
                 },
                 orderBy: { code: 'asc' }
@@ -94,23 +101,32 @@ export async function GET(req, { params }) {
                 include: {
                     gameSessions: {
                         where: { cycleId: currentCycleId },
-                        select: { pnl: true, rake: true }
+                        select: { pnl: true, rake: true, gameType: true }
+                    },
+                    playerRingTotals: {
+                        where: { cycleId: currentCycleId },
+                        select: { totalPnl: true, totalRake: true }
                     }
                 },
                 orderBy: { code: 'asc' }
             });
         }
 
-        // Calculate balance from sessions for each sub player
         details.subPlayers = rawSubPlayers.map(p => {
-            const totalPnL = p.gameSessions.reduce((sum, gs) => sum + (gs.pnl || 0), 0);
-            const totalRake = p.gameSessions.reduce((sum, gs) => sum + (gs.rake || 0), 0);
-            const { gameSessions, ...playerWithoutSessions } = p;
+            const ringPnl = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalPnl || 0), 0);
+            const ringRake = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalRake || 0), 0);
+            const mttPnl = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.pnl || 0), 0);
+            const mttRake = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.rake || 0), 0);
+            const totalPnL = ringPnl + mttPnl;
+            const totalRake = ringRake + mttRake;
+            const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
+            const { gameSessions, playerRingTotals, ...rest } = p;
             return {
-                ...playerWithoutSessions,
-                balance: totalPnL, // Calculated balance
+                ...rest,
+                balance: totalPnL + totalRakebackAmount,
+                totalWinnings: totalPnL,
                 totalRake,
-                totalRakebackAmount: (totalRake * (p.rakeback || 0)) / 100
+                totalRakebackAmount
             };
         });
 

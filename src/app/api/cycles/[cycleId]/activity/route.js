@@ -67,21 +67,29 @@ export async function GET(req, { params }) {
                 manager: { select: { name: true, code: true } },
                 gameSessions: {
                     where: { cycleId },
-                    select: { rake: true, pnl: true }
+                    select: { rake: true, pnl: true, gameType: true }
+                },
+                playerRingTotals: {
+                    where: { cycleId },
+                    select: { totalPnl: true, totalRake: true }
                 }
             },
             orderBy: { code: 'asc' }
         });
 
         const players = rawSubPlayers.map(p => {
-            const totalRake = p.gameSessions.reduce((sum, gs) => sum + (gs.rake || 0), 0);
-            const totalPnL = p.gameSessions.reduce((sum, gs) => sum + (gs.pnl || 0), 0);
+            const ringPnl = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalPnl || 0), 0);
+            const ringRake = (p.playerRingTotals || []).reduce((s, r) => s + (r.totalRake || 0), 0);
+            const mttPnl = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.pnl || 0), 0);
+            const mttRake = (p.gameSessions || []).filter(gs => gs.gameType === 'MTT').reduce((s, gs) => s + (gs.rake || 0), 0);
+            const totalPnL = ringPnl + mttPnl;
+            const totalRake = ringRake + mttRake;
             const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
-            
-            const { gameSessions, ...userWithoutGames } = p;
+            const { gameSessions, playerRingTotals, ...rest } = p;
             return {
-                ...userWithoutGames,
-                balance: totalPnL,
+                ...rest,
+                balance: totalPnL + totalRakebackAmount,
+                totalWinnings: totalPnL,
                 totalRakebackAmount,
                 totalRake
             };

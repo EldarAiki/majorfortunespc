@@ -42,8 +42,9 @@ model User {
   balance       Float   @default(0)
   rakeback      Float   @default(0) // Percentage
   
-  gameSessions  GameSession[]
-  
+  gameSessions     GameSession[]
+  playerRingTotals PlayerRingTotal[]
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -57,7 +58,8 @@ model Cycle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
-  gameSessions GameSession[]
+  gameSessions     GameSession[]
+  playerRingTotals PlayerRingTotal[]
 }
 
 model GameSession {
@@ -82,6 +84,24 @@ model GameSession {
   
   cycleId   String?
   cycle     Cycle?   @relation(fields: [cycleId], references: [id])
+}
+
+/// Ring-game totals per player per import period (from Union Member Statistics).
+/// Used with MTT session totals to compute cycle winnings and rake.
+model PlayerRingTotal {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  cycleId    String
+  cycle      Cycle    @relation(fields: [cycleId], references: [id])
+  periodDate DateTime /// Import/session date (one row per player per import)
+  totalPnl   Float    /// Total ring-game winnings for this period
+  totalRake  Float    /// Total ring-game rake for this period
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, cycleId, periodDate])
 }
 
 model ImportLog {

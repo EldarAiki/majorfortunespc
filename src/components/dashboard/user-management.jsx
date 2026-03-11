@@ -121,7 +121,7 @@ export default function UserManagement() {
                                             variant="outline"
                                             size="sm"
                                             onClick={() => setSelectedUser(user)}
-                                            className="text-orange-600 border-orange-200 hover:bg-orange-50"
+                                            className="text-red-600 border-red-200 hover:bg-red-50"
                                         >
                                             <Key className="h-4 w-4 mr-1" />
                                             {t("reset_password") || "Reset Pass"}
