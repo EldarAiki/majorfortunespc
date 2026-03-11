@@ -24,6 +24,7 @@ export default function PlayerView({ user, games, totalWinnings = 0, totalRake =
     const cycleRakeback = (totalRake * (user.rakeback || 0)) / 100;
     const cycleBalance = totalWinnings + cycleRakeback;
     const cycleWinnings = totalWinnings;
+    const ringGames = games?.filter((g) => g.gameType === "RING") ?? [];
 
     const handleExport = async () => {
         const workbook = new ExcelJS.Workbook();
@@ -171,9 +172,7 @@ export default function PlayerView({ user, games, totalWinnings = 0, totalRake =
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {(() => {
-                                const ringGames = games?.filter((g) => g.gameType === "RING") ?? [];
-                                return !ringGames.length ? (
+                            {!(ringGames?.length) ? (
                                 <TableRow>
                                     <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
                                         No ring game sessions found.
@@ -192,8 +191,8 @@ export default function PlayerView({ user, games, totalWinnings = 0, totalRake =
                                             {game.pnl >= 0 ? '+' : ''}{game.pnl?.toLocaleString()}
                                         </TableCell>
                                     </TableRow>
-                                ));
-                            })()}
+                                ))
+                            )}
                         </TableBody>
                     </Table>
                 </CardContent>
