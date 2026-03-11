@@ -300,7 +300,8 @@ export async function parseAndImport(buffer) {
     // ========================================
     // 2. Sync Users to Database
     // ========================================
-    const allUserCodes = Array.from(users.keys());
+    // Filter out placeholder codes like "-" that should not become real users
+    const allUserCodes = Array.from(users.keys()).filter(code => code && code !== '-');
     
     // Fetch existing users
     const existingUsers = await prisma.user.findMany({
@@ -312,6 +313,9 @@ export async function parseAndImport(buffer) {
     // Create new users
     const usersToCreate = [];
     for (const [code, data] of users) {
+        // Extra safety: never create users for placeholder "-" codes
+        if (!code || code === '-') continue;
+
         if (!existingUserMap.has(code)) {
             usersToCreate.push({
                 code: data.code,

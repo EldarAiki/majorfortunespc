@@ -9,9 +9,9 @@ async function main() {
         update: {},
         create: {
             code: 'ADMIN',
-            name: 'Manager',
+            name: 'admin',
             password: hashedPassword,
-            role: 'MANAGER',
+            role: 'ADMIN',
         },
     });
     console.log({ admin });
