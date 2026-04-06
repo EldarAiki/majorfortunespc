@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/prisma";
+import { managerSubordinatesWhereClause } from "@/lib/manager-scope";
 
 export async function GET(req, { params }) {
     const session = await getServerSession(authOptions);
@@ -47,11 +48,7 @@ export async function GET(req, { params }) {
         if (user.role === "ADMIN") {
             where = {};
         } else if (user.role === "MANAGER") {
-            where = {
-                OR: [
-                    { managerId: user.id },
-                ]
-            };
+            where = await managerSubordinatesWhereClause(prisma, user.id);
         } else {
             where = {
                 OR: [

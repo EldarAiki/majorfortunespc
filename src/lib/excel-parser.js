@@ -385,7 +385,7 @@ export async function parseAndImport(buffer) {
     });
     const codeToId = new Map(allDbUsers.map(u => [u.code, u.id]));
 
-    // Update user hierarchy relationships
+    // Update user hierarchy from the sheet (club / agent / super-agent). managerId is never set from Excel—admins assign managers in the dashboard.
     const userUpdates = Array.from(users.values()).map(userData => {
         const userId = codeToId.get(userData.code);
         if (!userId) return null;

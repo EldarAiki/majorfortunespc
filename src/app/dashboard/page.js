@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../api/auth/[...nextauth]/route";
 import prisma from "@/lib/prisma";
+import { managerSubordinatesWhereClause } from "@/lib/manager-scope";
 import PlayerView from "@/components/dashboard/player-view";
 import AgentView from "@/components/dashboard/agent-view";
 
@@ -8,6 +9,8 @@ import AdminView from "@/components/dashboard/admin-view";
 import { redirect } from "next/navigation";
 
 export const dynamic = 'force-dynamic';
+
+/** Financial column order (Winning → Rake → Rakeback → Balance) is applied in AgentView and PlayerView. */
 
 export default async function DashboardPage() {
     const session = await getServerSession(authOptions);
@@ -33,6 +36,19 @@ export default async function DashboardPage() {
     });
 
     const currentCycleId = currentCycle?.id;
+
+    const clubFullRows = await prisma.clubFullManager.findMany({
+        select: { clubId: true, managerId: true },
+    });
+    const clubFullByClubId = Object.fromEntries(
+        clubFullRows.map((r) => [r.clubId, r.managerId])
+    );
+
+    const managersList = await prisma.user.findMany({
+        where: { role: "MANAGER" },
+        select: { id: true, name: true, code: true },
+        orderBy: { code: "asc" },
+    });
 
     // Fetch games for the user (Current Cycle); ring sessions for table, MTT for totals
     const games = await prisma.gameSession.findMany({
@@ -71,21 +87,7 @@ export default async function DashboardPage() {
         if (user.role === "ADMIN") {
             where = {}; // Admin sees all
         } else if (user.role === "MANAGER") {
-            // Manager sees all their subordinates: clubs, super agents, agents, and players
-            // A user is under a manager if they have managerId = user.id
-            // OR if they belong to a club that has managerId = user.id
-            // OR if their superAgent/agent chain leads to a manager
-            
-            // Direct subordinates (users with managerId = this manager)
-            // Also need to include users in clubs under this manager
-            // For now, we'll fetch direct subordinates and handle club relationships separately
-            where = {
-                OR: [
-                    { managerId: user.id }, // Direct subordinates
-                    // Note: Club relationships will be handled in the hierarchy building logic
-                    // since clubs are stored as strings (clubId/clubName) rather than User records
-                ]
-            };
+            where = await managerSubordinatesWhereClause(prisma, user.id);
         } else {
             // Agents and Super Agents
             where = {
@@ -134,9 +136,25 @@ export default async function DashboardPage() {
     }
 
     if (user.role === "ADMIN") {
-        return <AdminView user={user} games={games} subPlayers={subPlayers} />;
+        return (
+            <AdminView
+                user={user}
+                games={games}
+                subPlayers={subPlayers}
+                clubFullByClubId={clubFullByClubId}
+                managers={managersList}
+            />
+        );
     } else if (["MANAGER", "SUPER_AGENT", "AGENT"].includes(user.role)) {
-        return <AgentView user={user} games={games} subPlayers={subPlayers} />;
+        return (
+            <AgentView
+                user={user}
+                games={games}
+                subPlayers={subPlayers}
+                clubFullByClubId={clubFullByClubId}
+                managers={managersList}
+            />
+        );
     } else {
         return <PlayerView user={user} games={games} totalWinnings={totalWinnings} totalRake={totalRake} />;
     }

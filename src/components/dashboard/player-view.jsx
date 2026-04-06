@@ -79,7 +79,56 @@ export default function PlayerView({ user, games, totalWinnings = 0, totalRake =
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            {t("winning")}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className={`text-2xl font-bold ${cycleWinnings >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {cycleWinnings?.toLocaleString()}
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            {t("rake")}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-green-600">
+                            {totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            {t("rakeback")} ({user.rakeback}%)
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-2xl font-bold text-green-600">
+                            {cycleRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                    </CardContent>
+                </Card>
+                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
+                            {t("balance")}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className={`text-2xl font-bold ${cycleBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            {cycleBalance?.toLocaleString()}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">Winnings + Rakeback</p>
+                    </CardContent>
+                </Card>
                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
@@ -101,55 +150,6 @@ export default function PlayerView({ user, games, totalWinnings = 0, totalRake =
                     <CardContent>
                         <div className="text-2xl font-bold text-blue-600">
                             {user.code}
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                            {t("balance")}
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${cycleBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {cycleBalance?.toLocaleString()}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">Winnings + Rakeback</p>
-                    </CardContent>
-                </Card>
-                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                            Winnings
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${cycleWinnings >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            {cycleWinnings?.toLocaleString()}
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                            Rake
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">
-                            {totalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md overflow-hidden group">
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-primary transition-colors">
-                            {t("rakeback")} ({user.rakeback}%)
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-green-600">
-                            {cycleRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                     </CardContent>
                 </Card>

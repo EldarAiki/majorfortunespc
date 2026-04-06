@@ -11,7 +11,7 @@ import { useLanguage } from "@/lib/i18n";
 import { useState } from "react";
 import { ManageUsersModal } from "./manage-users-modal";
 
-export default function AdminView({ user, games, subPlayers }) {
+export default function AdminView({ user, games, subPlayers, clubFullByClubId = {}, managers = [] }) {
     const { t } = useLanguage();
     const [uploading, setUploading] = useState(false);
     const [cycleLoading, setCycleLoading] = useState(false);
@@ -72,7 +72,13 @@ export default function AdminView({ user, games, subPlayers }) {
             </TabsList>
 
             <TabsContent value="overview">
-                <AgentView user={user} games={games} subPlayers={subPlayers} />
+                <AgentView
+                    user={user}
+                    games={games}
+                    subPlayers={subPlayers}
+                    clubFullByClubId={clubFullByClubId}
+                    managers={managers}
+                />
             </TabsContent>
 
             <TabsContent value="admin" className="space-y-6">

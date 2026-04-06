@@ -45,8 +45,21 @@ model User {
   gameSessions     GameSession[]
   playerRingTotals PlayerRingTotal[]
 
+  /// Whole-club assignment: all members with no explicit managerId fall under this manager.
+  clubFullAssignments ClubFullManager[] @relation("ClubFullManagers")
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+/// When set, every user in `clubId` with `managerId = null` is in scope for `managerId`.
+model ClubFullManager {
+  clubId    String @id
+  managerId String
+  manager   User   @relation("ClubFullManagers", fields: [managerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Cycle {

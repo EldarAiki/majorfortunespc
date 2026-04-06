@@ -12,11 +12,12 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Download, Search, Settings2, Eye, RefreshCw, ChevronRight, ChevronDown, Users } from "lucide-react";
+import { Download, Search, Settings2, Eye, RefreshCw, ChevronRight, ChevronDown, Users, UserCog } from "lucide-react";
 import PlayerView from "./player-view";
 import { useLanguage } from "@/lib/i18n";
 import ExcelJS from "exceljs";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { filterUsersForManager } from "@/lib/manager-scope";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -36,7 +37,252 @@ import {
 import { Label } from "@/components/ui/label";
 import DetailsModal from "./details-modal";
 
-export default function AgentView({ user, games, subPlayers }) {
+function assignedManagerLabel({ rowUser, clubId, clubFullByClubId, managers }) {
+    if (clubId) {
+        const mid = clubFullByClubId[clubId];
+        if (!mid) return null;
+        const m = managers.find((x) => x.id === mid);
+        return (m?.name && m.name.trim()) || m?.code || null;
+    }
+    if (rowUser?.managerId) {
+        const rel = rowUser.manager;
+        const fromRel = (rel?.name && rel.name.trim()) || rel?.code;
+        const fromList = managers.find((x) => x.id === rowUser.managerId);
+        const fromListName = (fromList?.name && fromList.name.trim()) || fromList?.code;
+        return fromRel || fromListName || null;
+    }
+    if (rowUser?.clubId) {
+        const mid = clubFullByClubId[rowUser.clubId];
+        if (!mid) return null;
+        const m = managers.find((x) => x.id === mid);
+        return (m?.name && m.name.trim()) || m?.code || null;
+    }
+    return null;
+}
+
+function AssignManagerMenu({ rowUser, clubId, managers, clubFullByClubId, isAdmin }) {
+    const { t } = useLanguage();
+    const [busy, setBusy] = useState(false);
+    if (!isAdmin) return null;
+
+    const assignedName = assignedManagerLabel({ rowUser, clubId, clubFullByClubId, managers });
+    const triggerText = assignedName || t("select_manager_button");
+
+    const run = async (body) => {
+        setBusy(true);
+        try {
+            const res = await fetch("/api/admin/assign-manager", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (data.success) window.location.reload();
+            else alert(data.error || "Failed");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const cascade =
+        rowUser &&
+        (rowUser.role === "AGENT" || rowUser.role === "SUPER_AGENT");
+
+    const fullAssignedId = clubId ? clubFullByClubId[clubId] : null;
+
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    className="h-8 max-w-[14rem] justify-start"
+                    title={assignedName || t("select_manager_button")}
+                >
+                    <UserCog className="h-4 w-4 mr-1 shrink-0" />
+                    <span className="truncate">{triggerText}</span>
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto w-56">
+                <DropdownMenuLabel>
+                    {clubId
+                        ? (t("assign_whole_club") || "Whole club assignment")
+                        : (t("assign_user_tree") || "User & subtree")}
+                </DropdownMenuLabel>
+                {fullAssignedId && clubId && (
+                    <p className="px-2 text-[10px] text-muted-foreground">
+                        {t("club_currently_full") || "Club-wide:"}{" "}
+                        {managers.find((m) => m.id === fullAssignedId)?.code || fullAssignedId}
+                    </p>
+                )}
+                {(!managers || managers.length === 0) && (
+                    <DropdownMenuItem disabled className="text-muted-foreground text-xs">
+                        {t("no_managers_defined")}
+                    </DropdownMenuItem>
+                )}
+                {managers.map((m) => (
+                    <DropdownMenuItem
+                        key={m.id}
+                        className="cursor-pointer"
+                        onClick={() =>
+                            clubId
+                                ? run({ clubId, managerId: m.id })
+                                : run({ userId: rowUser.id, managerId: m.id, cascade })
+                        }
+                    >
+                        {m.name || m.code}{" "}
+                        <span className="text-muted-foreground text-xs">({m.code})</span>
+                    </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                    className="cursor-pointer text-destructive focus:text-destructive"
+                    onClick={() =>
+                        clubId
+                            ? run({ clubId, managerId: null })
+                            : run({ userId: rowUser.id, managerId: null, cascade })
+                    }
+                >
+                    {t("clear_manager") || "Clear assignment"}
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
+function aggregateTreeNode(node) {
+    let gBalance = node.personalBalance || 0;
+    let gRake = node.personalRake || 0;
+    let gRakeback = node.totalRake || 0;
+    let gWinning = node.personalWinning || 0;
+
+    node.children.forEach((child) => {
+        const sub = aggregateTreeNode(child);
+        gBalance += sub.groupBalance;
+        gRake += sub.groupRake;
+        gRakeback += sub.groupRakeback;
+        gWinning += sub.groupWinning;
+    });
+
+    node.groupBalance = gBalance;
+    node.groupRake = gRake;
+    node.totalRake = gRakeback;
+    node.groupWinning = gWinning;
+    return { groupBalance: gBalance, groupRake: gRake, groupRakeback: gRakeback, groupWinning: gWinning };
+}
+
+/** Agent / super-agent / player only (no club pseudo-nodes). */
+function buildOrgTreeWithoutClubs(members) {
+    if (!members?.length) return [];
+    const nodes = new Map();
+
+    members.forEach((u) => {
+        const id = u.id || u.code;
+        if (!id) return;
+        const personalRake = u.totalRake || 0;
+        const personalRakeback = u.totalRakebackAmount || 0;
+        const personalWinning =
+            u.totalWinnings ??
+            (u.balance != null ? (u.balance || 0) - (personalRakeback || 0) : 0);
+
+        if (!nodes.has(id)) {
+            nodes.set(id, {
+                ...u,
+                id,
+                type: u.role || "PLAYER",
+                children: [],
+                personalBalance: u.balance || 0,
+                groupBalance: 0,
+                personalRake,
+                groupRake: 0,
+                totalRake: personalRakeback,
+                personalWinning,
+                groupWinning: 0,
+                rakeback: u.rakeback || 0,
+                _parentFound: false,
+            });
+        }
+    });
+
+    nodes.forEach((node) => {
+        let parent = null;
+        if (node.type === "PLAYER") {
+            if (node.agentId && nodes.has(node.agentId)) parent = nodes.get(node.agentId);
+            else if (node.superAgentId && nodes.has(node.superAgentId))
+                parent = nodes.get(node.superAgentId);
+        } else if (node.type === "AGENT") {
+            if (node.superAgentId && nodes.has(node.superAgentId))
+                parent = nodes.get(node.superAgentId);
+        }
+        if (parent && parent !== node) {
+            if (!parent.children.find((c) => c.id === node.id)) {
+                parent.children.push(node);
+                node._parentFound = true;
+            }
+        }
+    });
+
+    const roots = [...nodes.values()].filter((n) => !n._parentFound);
+    roots.forEach((r) => aggregateTreeNode(r));
+    return roots;
+}
+
+function buildManagerActivityTree(scopedPlayers, layout, clubFullByClubId, activeManagerId) {
+    if (!scopedPlayers?.length) return [];
+    if (layout === "flat") {
+        return buildOrgTreeWithoutClubs(scopedPlayers);
+    }
+
+    const byClub = new Map();
+    for (const u of scopedPlayers) {
+        const key = u.clubId || "__none__";
+        if (!byClub.has(key)) byClub.set(key, []);
+        byClub.get(key).push(u);
+    }
+
+    const keys = [...byClub.keys()].sort((a, b) => {
+        if (a === "__none__") return 1;
+        if (b === "__none__") return -1;
+        const na = scopedPlayers.find((x) => x.clubId === a)?.clubName || a;
+        const nb = scopedPlayers.find((x) => x.clubId === b)?.clubName || b;
+        return String(na).localeCompare(String(nb));
+    });
+
+    const result = [];
+    for (const key of keys) {
+        const group = byClub.get(key);
+        const innerRoots = buildOrgTreeWithoutClubs(group);
+        if (key === "__none__") {
+            result.push(...innerRoots);
+        } else {
+            const sample = group[0];
+            const isFullClub = clubFullByClubId[key] === activeManagerId;
+            const clubNode = {
+                id: `club:${key}`,
+                code: key,
+                name: sample?.clubName || key,
+                type: "CLUB",
+                children: innerRoots,
+                personalBalance: 0,
+                groupBalance: 0,
+                personalRake: 0,
+                groupRake: 0,
+                totalRake: 0,
+                personalWinning: 0,
+                groupWinning: 0,
+                rakeback: 0,
+                _isFullClubForManager: isFullClub,
+            };
+            aggregateTreeNode(clubNode);
+            result.push(clubNode);
+        }
+    }
+
+    return result;
+}
+
+export default function AgentView({ user, games, subPlayers, clubFullByClubId = {}, managers = [] }) {
     const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedPlayer, setSelectedPlayer] = useState(null);
@@ -57,8 +303,125 @@ export default function AgentView({ user, games, subPlayers }) {
     };
 
     const [activitySearchTerm, setActivitySearchTerm] = useState("");
+    const [managerActivityLayout, setManagerActivityLayout] = useState("by_club");
+    const [managerActivitySearch, setManagerActivitySearch] = useState("");
+    const [mgrExpandedNodes, setMgrExpandedNodes] = useState(new Set());
+    const [mgrDrilledUserId, setMgrDrilledUserId] = useState(null);
     const [cycles, setCycles] = useState([]);
     const [cyclesLoading, setCyclesLoading] = useState(false);
+
+    const isAdmin = user.role === "ADMIN";
+    const showManagerActivityTab = isAdmin || user.role === "MANAGER";
+
+    const managerActivityHierarchy = useMemo(() => {
+        const q = managerActivitySearch.trim().toLowerCase();
+
+        if (user.role === "MANAGER") {
+            let scoped = filterUsersForManager(
+                subPlayers || [],
+                user.id,
+                clubFullByClubId
+            );
+            if (q) {
+                scoped = scoped.filter(
+                    (p) =>
+                        p.name?.toLowerCase().includes(q) ||
+                        p.code?.toLowerCase().includes(q)
+                );
+            }
+            return buildManagerActivityTree(
+                scoped,
+                managerActivityLayout,
+                clubFullByClubId,
+                user.id
+            );
+        }
+
+        if (isAdmin) {
+            const roots = [];
+            for (const mgr of managers) {
+                let scoped = filterUsersForManager(
+                    subPlayers || [],
+                    mgr.id,
+                    clubFullByClubId
+                );
+                if (q) {
+                    const byPlayer = scoped.filter(
+                        (p) =>
+                            p.name?.toLowerCase().includes(q) ||
+                            p.code?.toLowerCase().includes(q)
+                    );
+                    const mgrMatch =
+                        (mgr.name && mgr.name.toLowerCase().includes(q)) ||
+                        (mgr.code && mgr.code.toLowerCase().includes(q));
+                    scoped = mgrMatch ? scoped : byPlayer;
+                    if (scoped.length === 0 && !mgrMatch) continue;
+                }
+                const innerRoots = buildManagerActivityTree(
+                    scoped,
+                    managerActivityLayout,
+                    clubFullByClubId,
+                    mgr.id
+                );
+                const mgrNode = {
+                    id: mgr.id,
+                    code: mgr.code,
+                    name: mgr.name || mgr.code,
+                    type: "MANAGER",
+                    children: innerRoots,
+                    personalBalance: 0,
+                    groupBalance: 0,
+                    personalRake: 0,
+                    groupRake: 0,
+                    totalRake: 0,
+                    personalWinning: 0,
+                    groupWinning: 0,
+                    rakeback: 0,
+                };
+                aggregateTreeNode(mgrNode);
+                roots.push(mgrNode);
+            }
+            return roots;
+        }
+
+        return [];
+    }, [
+        user.role,
+        user.id,
+        isAdmin,
+        subPlayers,
+        managers,
+        managerActivityLayout,
+        clubFullByClubId,
+        managerActivitySearch,
+    ]);
+
+    let managerActivityDisplayRoots = managerActivityHierarchy;
+    if (mgrDrilledUserId) {
+        const findNode = (list, id) => {
+            for (const n of list) {
+                if (n.id === id) return n;
+                if (n.children?.length) {
+                    const f = findNode(n.children, id);
+                    if (f) return f;
+                }
+            }
+            return null;
+        };
+        const found = findNode(managerActivityHierarchy, mgrDrilledUserId);
+        managerActivityDisplayRoots = found
+            ? [found]
+            : managerActivityHierarchy;
+    }
+
+    const toggleMgrNode = (nodeId) => {
+        setMgrExpandedNodes((prev) => {
+            const next = new Set(prev);
+            if (next.has(nodeId)) next.delete(nodeId);
+            else next.add(nodeId);
+            return next;
+        });
+    };
 
     useEffect(() => {
         const fetchCycles = async () => {
@@ -245,28 +608,6 @@ export default function AgentView({ user, games, subPlayers }) {
             }
         });
 
-        // Aggregation Logic: Balance = winnings+rakeback, Winning = winnings (totalPnL)
-        const aggregate = (node) => {
-            let gBalance = node.personalBalance || 0;
-            let gRake = node.personalRake || 0;
-            let gRakeback = node.totalRake || 0;
-            let gWinning = node.personalWinning || 0;
-
-            node.children.forEach(child => {
-                const sub = aggregate(child);
-                gBalance += sub.groupBalance;
-                gRake += sub.groupRake;
-                gRakeback += sub.groupRakeback;
-                gWinning += sub.groupWinning;
-            });
-
-            node.groupBalance = gBalance;
-            node.groupRake = gRake;
-            node.totalRake = gRakeback;
-            node.groupWinning = gWinning;
-            return { groupBalance: gBalance, groupRake: gRake, groupRakeback: gRakeback, groupWinning: gWinning };
-        };
-
         // Aggregate all root nodes (managers, clubs without managers, and orphan nodes)
         const rootNodes = [];
         
@@ -285,7 +626,7 @@ export default function AgentView({ user, games, subPlayers }) {
         });
         
         // Aggregate all root nodes
-        rootNodes.forEach(aggregate);
+        rootNodes.forEach((n) => aggregateTreeNode(n));
 
         // Filter Logic
         const filterTree = (nodes) => {
@@ -339,11 +680,18 @@ export default function AgentView({ user, games, subPlayers }) {
 
     const hierarchy = buildHierarchy();
 
-    const HierarchyRow = ({ node, level = 0 }) => {
+    const HierarchyRow = ({
+        node,
+        level = 0,
+        expNodes = expandedNodes,
+        onToggleExpand = toggleNode,
+        drillId = drilledUserId,
+        onSetDrill = setDrilledUserId,
+    }) => {
         const hasChildren = node.children && node.children.length > 0;
         const name = node.name || node.code || "N/A";
         const isManagement = node.type !== 'PLAYER';
-        const isExpanded = expandedNodes.has(node.id);
+        const isExpanded = expNodes.has(node.id);
         const shouldShowChildren = hasChildren && isExpanded;
 
         // Calculate values for display
@@ -359,7 +707,7 @@ export default function AgentView({ user, games, subPlayers }) {
                         <div className="flex items-center gap-2">
                             {hasChildren ? (
                                 <button
-                                    onClick={() => toggleNode(node.id)}
+                                    onClick={() => onToggleExpand(node.id)}
                                     className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded transition-colors"
                                     aria-label={isExpanded ? "Collapse" : "Expand"}
                                 >
@@ -391,9 +739,48 @@ export default function AgentView({ user, games, subPlayers }) {
                                             {node.type === 'SUPER_AGENT' ? 'SA' : node.type === 'MANAGER' ? 'MGR' : node.type}
                                         </span>
                                     )}
+                                    {node.type === 'CLUB' && node._isFullClubForManager && (
+                                        <span className="text-[10px] text-green-700 dark:text-green-400 font-medium">
+                                            {t("full_club_under_manager") || "full club"}
+                                        </span>
+                                    )}
                                 </span>
                                 {isManagement && node.code && <span className="text-[10px] text-muted-foreground font-normal">{node.code}</span>}
                             </div>
+                        </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                            <span className={`font-semibold tabular-nums ${displayWinning >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {displayWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            </span>
+                            {isManagement && (
+                                <span className="text-[10px] block text-muted-foreground font-normal">
+                                    (Personal: {node.personalWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                </span>
+                            )}
+                        </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                            <span className="text-green-600 font-semibold tabular-nums">
+                                {displayRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            </span>
+                            {isManagement && (
+                                <span className="text-[10px] block text-muted-foreground font-normal">
+                                    (Personal: {node.personalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                </span>
+                            )}
+                        </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                        <div className="flex flex-col items-end">
+                            <span className="text-green-600 font-semibold tabular-nums">
+                                {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            </span>
+                            <span className="text-xs text-muted-foreground font-normal">
+                                ({node.rakeback}%)
+                            </span>
                         </div>
                     </TableCell>
                     <TableCell className="text-right">
@@ -413,67 +800,65 @@ export default function AgentView({ user, games, subPlayers }) {
                         </div>
                     </TableCell>
                     <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                            <span className="text-red-600 font-semibold tabular-nums">
-                                {displayRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
-                            </span>
+                        <div className="flex justify-end items-center gap-1 flex-wrap">
+                            {isAdmin && node.type === "CLUB" && (
+                                <AssignManagerMenu
+                                    clubId={node.code}
+                                    managers={managers}
+                                    clubFullByClubId={clubFullByClubId}
+                                    isAdmin={isAdmin}
+                                />
+                            )}
+                            {isAdmin &&
+                                node.type !== "CLUB" &&
+                                node.id &&
+                                node.type !== "MANAGER" && (
+                                    <AssignManagerMenu
+                                        rowUser={node}
+                                        managers={managers}
+                                        clubFullByClubId={clubFullByClubId}
+                                        isAdmin={isAdmin}
+                                    />
+                                )}
                             {isManagement && (
-                                <span className="text-[10px] block text-muted-foreground font-normal">
-                                    (Personal: {node.personalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
-                                </span>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                        onSetDrill(node.id === drillId ? null : node.id)
+                                    }
+                                    className={`h-8 px-2 ${node.id === drillId ? "bg-blue-50 text-blue-600" : ""}`}
+                                >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    {node.id === drillId ? "Reset" : "⤷"}
+                                </Button>
+                            )}
+                            {!isManagement && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 px-2 text-zinc-600 hover:text-zinc-700 hover:bg-zinc-100"
+                                    onClick={() => setDetailUserId(node.id)}
+                                >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    {t("details")}
+                                </Button>
                             )}
                         </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                            <span className={`font-semibold tabular-nums ${displayWinning >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                {displayWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
-                            </span>
-                            {isManagement && (
-                                <span className="text-[10px] block text-muted-foreground font-normal">
-                                    (Personal: {node.personalWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
-                                </span>
-                            )}
-                        </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                            <span className="text-green-600 font-semibold tabular-nums">
-                                {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
-                            </span>
-                            <span className="text-xs text-muted-foreground font-normal">
-                                ({node.rakeback}%)
-                            </span>
-                        </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                        {isManagement && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setDrilledUserId(node.id === drilledUserId ? null : node.id)}
-                                className={`h-8 px-2 ${node.id === drilledUserId ? 'bg-blue-50 text-blue-600' : ''}`}
-                            >
-                                <Eye className="h-4 w-4 mr-1" />
-                                {node.id === drilledUserId ? "Reset" : "⤷"}
-                            </Button>
-                        )}
-                        {!isManagement && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 px-2 text-zinc-600 hover:text-zinc-700 hover:bg-zinc-100"
-                                onClick={() => setDetailUserId(node.id)}
-                            >
-                                <Eye className="h-4 w-4 mr-1" />
-                                {t("details")}
-                            </Button>
-                        )}
                     </TableCell>
                 </TableRow>
-                {shouldShowChildren && node.children.map(child => (
-                    <HierarchyRow key={child.id} node={child} level={level + 1} />
-                ))}
+                {shouldShowChildren &&
+                    node.children.map((child) => (
+                        <HierarchyRow
+                            key={child.id}
+                            node={child}
+                            level={level + 1}
+                            expNodes={expNodes}
+                            onToggleExpand={onToggleExpand}
+                            drillId={drillId}
+                            onSetDrill={onSetDrill}
+                        />
+                    ))}
             </>
         );
     };
@@ -493,8 +878,10 @@ export default function AgentView({ user, games, subPlayers }) {
             { header: t('code'), key: 'code', width: 15 },
             { header: 'Name', key: 'name', width: 25 },
             { header: 'Role', key: 'role', width: 15 },
-            { header: t('balance'), key: 'balance', width: 15 },
+            { header: t('winning'), key: 'winning', width: 15 },
+            { header: t('rake'), key: 'rake', width: 15 },
             { header: t('rakeback'), key: 'rakeback', width: 15 },
+            { header: t('balance'), key: 'balance', width: 15 },
         ];
 
         filteredPlayers.forEach(p => {
@@ -502,8 +889,10 @@ export default function AgentView({ user, games, subPlayers }) {
                 code: p.code,
                 name: p.name,
                 role: p.role,
+                winning: p.totalWinnings ?? 0,
+                rake: p.totalRake ?? 0,
+                rakeback: p.rakeback + '%',
                 balance: p.balance,
-                rakeback: p.rakeback + '%'
             });
         });
 
@@ -535,8 +924,10 @@ export default function AgentView({ user, games, subPlayers }) {
                 { header: t('code'), key: 'code', width: 15 },
                 { header: 'Name', key: 'name', width: 25 },
                 { header: 'Role', key: 'role', width: 15 },
-                { header: t('balance'), key: 'balance', width: 15 },
+                { header: t('winning'), key: 'winning', width: 15 },
+                { header: t('rake'), key: 'rake', width: 15 },
                 { header: t('rakeback'), key: 'rakeback', width: 15 },
+                { header: t('balance'), key: 'balance', width: 15 },
             ];
 
             data.players.forEach(p => {
@@ -544,8 +935,10 @@ export default function AgentView({ user, games, subPlayers }) {
                     code: p.code,
                     name: p.name,
                     role: p.role,
+                    winning: p.totalWinnings ?? 0,
+                    rake: p.totalRake ?? 0,
+                    rakeback: p.rakeback + '%',
                     balance: p.balance,
-                    rakeback: p.rakeback + '%'
                 });
             });
 
@@ -604,10 +997,10 @@ export default function AgentView({ user, games, subPlayers }) {
             { header: 'User / Group', key: 'name', width: 30 },
             { header: t('code'), key: 'code', width: 15 },
             { header: 'Type', key: 'type', width: 15 },
-            { header: t('balance'), key: 'balance', width: 15 },
-            { header: 'Rake', key: 'rake', width: 15 },
-            { header: 'Winning', key: 'winning', width: 15 },
+            { header: t('winning'), key: 'winning', width: 15 },
+            { header: t('rake'), key: 'rake', width: 15 },
             { header: t('rakeback'), key: 'rakeback', width: 15 },
+            { header: t('balance'), key: 'balance', width: 15 },
             { header: 'Rakeback %', key: 'rakebackPercent', width: 12 },
         ];
 
@@ -618,10 +1011,10 @@ export default function AgentView({ user, games, subPlayers }) {
                 name: indent + row.name,
                 code: row.code,
                 type: row.type,
-                balance: row.balance,
-                rake: row.rake,
                 winning: row.winning,
+                rake: row.rake,
                 rakeback: row.rakeback,
+                balance: row.balance,
                 rakebackPercent: row.rakebackPercent + '%',
             });
         });
@@ -654,10 +1047,10 @@ export default function AgentView({ user, games, subPlayers }) {
                 { header: 'User / Group', key: 'name', width: 30 },
                 { header: t('code'), key: 'code', width: 15 },
                 { header: 'Type', key: 'type', width: 15 },
-                { header: t('balance'), key: 'balance', width: 15 },
-                { header: 'Rake', key: 'rake', width: 15 },
-                { header: 'Winning', key: 'winning', width: 15 },
+                { header: t('winning'), key: 'winning', width: 15 },
+                { header: t('rake'), key: 'rake', width: 15 },
                 { header: t('rakeback'), key: 'rakeback', width: 15 },
+                { header: t('balance'), key: 'balance', width: 15 },
                 { header: 'Rakeback %', key: 'rakebackPercent', width: 12 },
             ];
 
@@ -671,10 +1064,10 @@ export default function AgentView({ user, games, subPlayers }) {
                     name: p.name || p.code || "N/A",
                     code: p.code,
                     type: p.role,
-                    balance: balance,
-                    rake: totalRake,
                     winning: winning,
+                    rake: totalRake,
                     rakeback: totalRakebackAmount,
+                    balance: balance,
                     rakebackPercent: (p.rakeback || 0) + '%',
                 });
             });
@@ -705,6 +1098,11 @@ export default function AgentView({ user, games, subPlayers }) {
                 <TabsTrigger value="activity" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950">
                     {t("club_activity")}
                 </TabsTrigger>
+                {showManagerActivityTab && (
+                    <TabsTrigger value="manager_activity" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950">
+                        {t("manager_activity")}
+                    </TabsTrigger>
+                )}
             </TabsList>
 
             <TabsContent value="stats" className="space-y-4">
@@ -785,8 +1183,10 @@ export default function AgentView({ user, games, subPlayers }) {
                                     <TableHead>{t("code")}</TableHead>
                                     <TableHead>Name</TableHead>
                                     <TableHead>Role</TableHead>
-                                    <TableHead className="text-right">{t("balance")}</TableHead>
+                                    <TableHead className="text-right">{t("winning")}</TableHead>
+                                    <TableHead className="text-right">{t("rake")}</TableHead>
                                     <TableHead className="text-right">{t("rakeback")}</TableHead>
+                                    <TableHead className="text-right">{t("balance")}</TableHead>
                                     <TableHead className="text-right">{t("actions")}</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -800,38 +1200,54 @@ export default function AgentView({ user, games, subPlayers }) {
                                                 {player.role}
                                             </span>
                                         </TableCell>
+                                        <TableCell className={`text-right font-semibold tabular-nums ${(player.totalWinnings ?? 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                            {(player.totalWinnings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </TableCell>
+                                        <TableCell className="text-right text-green-600 font-semibold tabular-nums">
+                                            {(player.totalRake ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </TableCell>
+                                        <TableCell className="text-right text-green-600 font-semibold">{player.rakeback}%</TableCell>
                                         <TableCell className={`text-right font-bold ${player.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                                             {player.balance?.toLocaleString()}
                                         </TableCell>
-                                        <TableCell className="text-right text-green-600 font-semibold">{player.rakeback}%</TableCell>
-                                        <TableCell className="text-right flex justify-end gap-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                onClick={() => {
-                                                    setSelectedPlayer(player);
-                                                    setNewRakeback(player.rakeback.toString());
-                                                }}
-                                            >
-                                                <Settings2 className="h-4 w-4 mr-1" />
-                                                {t("set_rakeback")}
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="h-8 px-2 text-zinc-600 hover:text-zinc-700 hover:bg-zinc-100"
-                                                onClick={() => setDetailUserId(player.id)}
-                                            >
-                                                <Eye className="h-4 w-4 mr-1" />
-                                                {t("details")}
-                                            </Button>
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-2 flex-wrap">
+                                                {isAdmin && player.role !== "MANAGER" && (
+                                                    <AssignManagerMenu
+                                                        rowUser={player}
+                                                        managers={managers}
+                                                        clubFullByClubId={clubFullByClubId}
+                                                        isAdmin={isAdmin}
+                                                    />
+                                                )}
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                    onClick={() => {
+                                                        setSelectedPlayer(player);
+                                                        setNewRakeback(player.rakeback.toString());
+                                                    }}
+                                                >
+                                                    <Settings2 className="h-4 w-4 mr-1" />
+                                                    {t("set_rakeback")}
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 px-2 text-zinc-600 hover:text-zinc-700 hover:bg-zinc-100"
+                                                    onClick={() => setDetailUserId(player.id)}
+                                                >
+                                                    <Eye className="h-4 w-4 mr-1" />
+                                                    {t("details")}
+                                                </Button>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
                                 {filteredPlayers.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
+                                        <TableCell colSpan={8} className="text-center py-10 text-muted-foreground italic">
                                             No players found.
                                         </TableCell>
                                     </TableRow>
@@ -909,11 +1325,11 @@ export default function AgentView({ user, games, subPlayers }) {
                             <TableHeader>
                                 <TableRow className="hover:bg-transparent border-primary/10">
                                     <TableHead>User / Group</TableHead>
-                                    <TableHead className="text-right">Balance</TableHead>
-                                    <TableHead className="text-right">Rake</TableHead>
-                                    <TableHead className="text-right">Winning</TableHead>
-                                    <TableHead className="text-right">Rakeback</TableHead>
-                                    <TableHead className="text-right">Actions</TableHead>
+                                    <TableHead className="text-right">{t("winning")}</TableHead>
+                                    <TableHead className="text-right">{t("rake")}</TableHead>
+                                    <TableHead className="text-right">{t("rakeback")}</TableHead>
+                                    <TableHead className="text-right">{t("balance")}</TableHead>
+                                    <TableHead className="text-right">{t("actions")}</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -932,6 +1348,97 @@ export default function AgentView({ user, games, subPlayers }) {
                     </CardContent>
                 </Card>
             </TabsContent>
+
+            {showManagerActivityTab && (
+                <TabsContent value="manager_activity" className="space-y-4">
+                    <div className="flex flex-wrap gap-4 items-center">
+                        <span className="text-sm text-muted-foreground">
+                            {t("manager_hierarchy_layout") || "Layout"}:
+                        </span>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                                type="radio"
+                                name="mgr_layout"
+                                checked={managerActivityLayout === "by_club"}
+                                onChange={() => setManagerActivityLayout("by_club")}
+                            />
+                            {t("manager_view_by_club") || "By clubs"}
+                        </label>
+                        <label className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                                type="radio"
+                                name="mgr_layout"
+                                checked={managerActivityLayout === "flat"}
+                                onChange={() => setManagerActivityLayout("flat")}
+                            />
+                            {t("manager_view_flat") || "Agents & players only"}
+                        </label>
+                    </div>
+                    <div className="relative w-full md:max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            placeholder={t("search_players")}
+                            className="bg-white dark:bg-zinc-900 border-none shadow-sm pl-9"
+                            value={managerActivitySearch}
+                            onChange={(e) => setManagerActivitySearch(e.target.value)}
+                        />
+                    </div>
+                    <Card className="border-none shadow-lg">
+                        <CardHeader>
+                            <CardTitle>{t("manager_activity")}</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="hover:bg-transparent border-primary/10">
+                                        <TableHead>User / Group</TableHead>
+                                        <TableHead className="text-right">{t("winning")}</TableHead>
+                                        <TableHead className="text-right">{t("rake")}</TableHead>
+                                        <TableHead className="text-right">{t("rakeback")}</TableHead>
+                                        <TableHead className="text-right">{t("balance")}</TableHead>
+                                        <TableHead className="text-right">{t("actions")}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {isAdmin && managers.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell
+                                                colSpan={6}
+                                                className="text-center py-10 text-muted-foreground italic"
+                                            >
+                                                {t("no_managers_defined") || "No manager users defined."}
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : (
+                                        <>
+                                            {managerActivityDisplayRoots.map((node) => (
+                                                <HierarchyRow
+                                                    key={node.id}
+                                                    node={node}
+                                                    expNodes={mgrExpandedNodes}
+                                                    onToggleExpand={toggleMgrNode}
+                                                    drillId={mgrDrilledUserId}
+                                                    onSetDrill={setMgrDrilledUserId}
+                                                />
+                                            ))}
+                                            {managerActivityDisplayRoots.length === 0 && (
+                                                <TableRow>
+                                                    <TableCell
+                                                        colSpan={6}
+                                                        className="text-center py-10 text-muted-foreground italic"
+                                                    >
+                                                        {t("no_activity_found") || "No activity found."}
+                                                    </TableCell>
+                                                </TableRow>
+                                            )}
+                                        </>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            )}
 
             <Dialog open={!!selectedPlayer} onOpenChange={(open) => !open && setSelectedPlayer(null)}>
                 <DialogContent>
