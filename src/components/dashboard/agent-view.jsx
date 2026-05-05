@@ -271,7 +271,7 @@ function buildManagerActivityTree(scopedPlayers, layout, clubFullByClubId, activ
                 totalRake: 0,
                 personalWinning: 0,
                 groupWinning: 0,
-                rakeback: 0,
+                rakeback: sample?.rakeback || 0,
                 _isFullClubForManager: isFullClub,
             };
             aggregateTreeNode(clubNode);
@@ -285,7 +285,7 @@ function buildManagerActivityTree(scopedPlayers, layout, clubFullByClubId, activ
 export default function AgentView({ user, games, subPlayers, clubFullByClubId = {}, managers = [] }) {
     const { t } = useLanguage();
     const [searchTerm, setSearchTerm] = useState("");
-    const [selectedPlayer, setSelectedPlayer] = useState(null);
+    const [selectedRakebackTarget, setSelectedRakebackTarget] = useState(null);
     const [newRakeback, setNewRakeback] = useState("");
     const [updating, setUpdating] = useState(false);
     const [detailUserId, setDetailUserId] = useState(null);
@@ -442,23 +442,25 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
     }, []);
 
     const handleUpdateRakeback = async () => {
-        if (!selectedPlayer || newRakeback === "") return;
+        if (!selectedRakebackTarget || newRakeback === "") return;
 
         setUpdating(true);
         try {
+            const parsedRakeback = parseFloat(newRakeback);
+            const body =
+                selectedRakebackTarget.type === "club"
+                    ? { clubId: selectedRakebackTarget.id, rakeback: parsedRakeback }
+                    : { userId: selectedRakebackTarget.id, rakeback: parsedRakeback };
             const res = await fetch("/api/admin/users/rakeback", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userId: selectedPlayer.id,
-                    rakeback: parseFloat(newRakeback),
-                }),
+                body: JSON.stringify(body),
             });
 
             const data = await res.json();
             if (data.success) {
                 alert(t("update_success") || "Update successful!");
-                setSelectedPlayer(null);
+                setSelectedRakebackTarget(null);
                 window.location.reload();
             } else {
                 alert(data.error || "Update failed");
@@ -687,6 +689,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
         onToggleExpand = toggleNode,
         drillId = drilledUserId,
         onSetDrill = setDrilledUserId,
+        tableVariant = "activity",
     }) => {
         const hasChildren = node.children && node.children.length > 0;
         const name = node.name || node.code || "N/A";
@@ -699,6 +702,13 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
         const displayRake = isManagement ? node.groupRake : node.personalRake;
         const displayWinning = isManagement ? node.groupWinning : node.personalWinning;
         const displayRakeback = node.totalRake || 0; // rakeback amount
+        const displayTotal = displayWinning - displayRake;
+        const isManagerTable = tableVariant === "manager";
+        const showClubRakebackInActions =
+            isManagerTable &&
+            managerActivityLayout === "by_club" &&
+            !!mgrDrilledUserId &&
+            node.type === "CLUB";
 
         return (
             <>
@@ -773,32 +783,50 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                             )}
                         </div>
                     </TableCell>
-                    <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                            <span className="text-green-600 font-semibold tabular-nums">
-                                {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
-                            </span>
-                            <span className="text-xs text-muted-foreground font-normal">
-                                ({node.rakeback}%)
-                            </span>
-                        </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                            <span className={`font-bold tabular-nums ${displayBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                {isManagement ? (
-                                    <>
-                                        Total: {displayBalance.toLocaleString()}
-                                        <span className="text-[10px] block text-muted-foreground font-normal">
-                                            (Personal: {node.personalBalance.toLocaleString()})
-                                        </span>
-                                    </>
-                                ) : (
-                                    displayBalance.toLocaleString()
+                    {!isManagerTable && (
+                        <>
+                            <TableCell className="text-right">
+                                <div className="flex flex-col items-end">
+                                    <span className="text-green-600 font-semibold tabular-nums">
+                                        {displayRakeback?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground font-normal">
+                                        ({node.rakeback}%)
+                                    </span>
+                                </div>
+                            </TableCell>
+                            <TableCell className="text-right">
+                                <div className="flex flex-col items-end">
+                                    <span className={`font-bold tabular-nums ${displayBalance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                        {isManagement ? (
+                                            <>
+                                                Total: {displayBalance.toLocaleString()}
+                                                <span className="text-[10px] block text-muted-foreground font-normal">
+                                                    (Personal: {node.personalBalance.toLocaleString()})
+                                                </span>
+                                            </>
+                                        ) : (
+                                            displayBalance.toLocaleString()
+                                        )}
+                                    </span>
+                                </div>
+                            </TableCell>
+                        </>
+                    )}
+                    {isManagerTable && (
+                        <TableCell className="text-right">
+                            <div className="flex flex-col items-end">
+                                <span className={`font-bold tabular-nums ${displayTotal >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                    {displayTotal?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                                </span>
+                                {isManagement && (
+                                    <span className="text-[10px] block text-muted-foreground font-normal">
+                                        (Personal: {(node.personalWinning - node.personalRake)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                    </span>
                                 )}
-                            </span>
-                        </div>
-                    </TableCell>
+                            </div>
+                        </TableCell>
+                    )}
                     <TableCell className="text-right">
                         <div className="flex justify-end items-center gap-1 flex-wrap">
                             {isAdmin && node.type === "CLUB" && (
@@ -820,6 +848,32 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                         isAdmin={isAdmin}
                                     />
                                 )}
+                            {(isAdmin || user.role === "MANAGER") && node.type === "CLUB" && (
+                                <>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                        onClick={() => {
+                                            setSelectedRakebackTarget({
+                                                type: "club",
+                                                id: node.code,
+                                                code: node.code,
+                                                name: node.name,
+                                            });
+                                            setNewRakeback("");
+                                        }}
+                                    >
+                                        <Settings2 className="h-4 w-4 mr-1" />
+                                        {t("set_rakeback")}
+                                    </Button>
+                                    {showClubRakebackInActions && (
+                                        <span className="text-xs text-muted-foreground px-1.5">
+                                            {t("rakeback")}: {node.rakeback || 0}%
+                                        </span>
+                                    )}
+                                </>
+                            )}
                             {isManagement && (
                                 <Button
                                     variant="ghost"
@@ -857,6 +911,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                             onToggleExpand={onToggleExpand}
                             drillId={drillId}
                             onSetDrill={onSetDrill}
+                            tableVariant={tableVariant}
                         />
                     ))}
             </>
@@ -1225,7 +1280,12 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                                     size="sm"
                                                     className="h-8 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                                     onClick={() => {
-                                                        setSelectedPlayer(player);
+                                                        setSelectedRakebackTarget({
+                                                            type: "user",
+                                                            id: player.id,
+                                                            code: player.code,
+                                                            name: player.name,
+                                                        });
                                                         setNewRakeback(player.rakeback.toString());
                                                     }}
                                                 >
@@ -1394,8 +1454,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                         <TableHead>User / Group</TableHead>
                                         <TableHead className="text-right">{t("winning")}</TableHead>
                                         <TableHead className="text-right">{t("rake")}</TableHead>
-                                        <TableHead className="text-right">{t("rakeback")}</TableHead>
-                                        <TableHead className="text-right">{t("balance")}</TableHead>
+                                        <TableHead className="text-right">Total</TableHead>
                                         <TableHead className="text-right">{t("actions")}</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -1419,6 +1478,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                                     onToggleExpand={toggleMgrNode}
                                                     drillId={mgrDrilledUserId}
                                                     onSetDrill={setMgrDrilledUserId}
+                                                    tableVariant="manager"
                                                 />
                                             ))}
                                             {managerActivityDisplayRoots.length === 0 && (
@@ -1440,12 +1500,17 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                 </TabsContent>
             )}
 
-            <Dialog open={!!selectedPlayer} onOpenChange={(open) => !open && setSelectedPlayer(null)}>
+            <Dialog
+                open={!!selectedRakebackTarget}
+                onOpenChange={(open) => !open && setSelectedRakebackTarget(null)}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{t("set_rakeback")}</DialogTitle>
                         <DialogDescription>
-                            Update rakeback for player {selectedPlayer?.code}.
+                            {selectedRakebackTarget?.type === "club"
+                                ? `Update rakeback for all users in club ${selectedRakebackTarget?.code}.`
+                                : `Update rakeback for player ${selectedRakebackTarget?.code}.`}
                             {(user.role !== 'MANAGER' && user.role !== 'ADMIN') && ` Max allowed: ${user.rakeback}%`}
                         </DialogDescription>
                     </DialogHeader>
@@ -1468,7 +1533,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setSelectedPlayer(null)}>
+                        <Button variant="outline" onClick={() => setSelectedRakebackTarget(null)}>
                             Cancel
                         </Button>
                         <Button onClick={handleUpdateRakeback} disabled={updating}>

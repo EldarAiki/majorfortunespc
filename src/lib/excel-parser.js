@@ -49,6 +49,103 @@ const RING_COLS = {
 const DATA_START_ROW = 7; // First data row in Member Statistics
 const MTT_DATA_START_ROW = 8; // First data row in MTT Detail
 
+function normalizeLabel(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+        .toLowerCase()
+        .replace(/&/g, 'and')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function getRowTokens(sheet, rowNumber) {
+    const row = sheet.getRow(rowNumber);
+    const tokens = new Map();
+
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const token = normalizeLabel(cell.value);
+        if (token) tokens.set(colNumber, token);
+    });
+
+    return tokens;
+}
+
+function findSheetByKeywords(workbook, requiredKeywords) {
+    const keywords = requiredKeywords.map(k => normalizeLabel(k));
+    return workbook.worksheets.find((ws) => {
+        const title = normalizeLabel(ws.name || ws.title || '');
+        return keywords.every(k => title.includes(k));
+    }) || null;
+}
+
+function findMemberColumnMap(sheet) {
+    const row4 = getRowTokens(sheet, 4);
+    const row5 = getRowTokens(sheet, 5);
+    const row6 = getRowTokens(sheet, 6);
+
+    const findByRow6 = (token, fallback) => {
+        for (const [col, t] of row6.entries()) {
+            if (t === token) return col;
+        }
+        return fallback;
+    };
+
+    const findRakeTotal = () => {
+        let rakeStartCol = null;
+        for (const [col, t] of row4.entries()) {
+            if (t === 'rake and fee') {
+                rakeStartCol = col;
+                break;
+            }
+        }
+        if (!rakeStartCol) return MEMBER_COLS.TOTAL_RAKE;
+
+        for (let col = rakeStartCol; col <= sheet.columnCount; col += 1) {
+            if (row5.get(col) === 'total') return col;
+        }
+        return MEMBER_COLS.TOTAL_RAKE;
+    };
+
+    const findPnlTotal = () => {
+        // In existing files this is the "Total" in row 5 right before the "Rake&Fee" group.
+        let rakeStartCol = null;
+        for (const [col, t] of row4.entries()) {
+            if (t === 'rake and fee') {
+                rakeStartCol = col;
+                break;
+            }
+        }
+        if (rakeStartCol) {
+            for (let col = rakeStartCol - 1; col >= 1; col -= 1) {
+                if (row5.get(col) === 'total') return col;
+            }
+        }
+        return MEMBER_COLS.TOTAL_PNL;
+    };
+
+    return {
+        CLUB: 1,
+        SUPER_AGENT_ID: findByRow6('id', MEMBER_COLS.SUPER_AGENT_ID),
+        SUPER_AGENT_NAME: findByRow6('nickname', MEMBER_COLS.SUPER_AGENT_NAME),
+        AGENT_ID: 5,
+        AGENT_NAME: 6,
+        ROLE: 8,
+        MEMBER_ID: 9,
+        MEMBER_NAME: 10,
+        TOTAL_PNL: findPnlTotal(),
+        TOTAL_RAKE: findRakeTotal(),
+    };
+}
+
+function findDataStartRow(sheet, idToken = 'id') {
+    for (let rowNum = 1; rowNum <= Math.min(sheet.rowCount, 30); rowNum += 1) {
+        const rowTokens = getRowTokens(sheet, rowNum);
+        const hasId = Array.from(rowTokens.values()).some(t => t === idToken);
+        if (hasId) return rowNum + 1;
+    }
+    return null;
+}
+
 /**
  * Parse club info from cell value like "Club Name (ID:123456)"
  */
@@ -82,19 +179,6 @@ function getString(row, col) {
 }
 
 /**
- * Check if row is a summary/total row that should be skipped
- */
-function isTotalRow(row) {
-    const name = getString(row, MEMBER_COLS.MEMBER_NAME);
-    const agentName = getString(row, MEMBER_COLS.AGENT_NAME);
-    const saName = getString(row, MEMBER_COLS.SUPER_AGENT_NAME);
-    
-    return (name?.toLowerCase() === 'total' || 
-            agentName?.toLowerCase() === 'total' || 
-            saName?.toLowerCase() === 'total');
-}
-
-/**
  * Extract date from the sheet header
  */
 function extractDateFromSheet(sheet) {
@@ -122,20 +206,30 @@ function parseMemberStatistics(sheet) {
     const users = new Map();
     const ringTotals = [];
     let currentClub = null;
+    const cols = findMemberColumnMap(sheet);
+    const dataStartRow = findDataStartRow(sheet) || DATA_START_ROW;
 
     sheet.eachRow((row, rowNumber) => {
-        if (rowNumber < DATA_START_ROW) return;
-        if (isTotalRow(row)) return;
+        if (rowNumber < dataStartRow) return;
 
-        const clubInfo = parseClubInfo(row.getCell(MEMBER_COLS.CLUB).value);
+        const name = getString(row, cols.MEMBER_NAME);
+        const agentNameCheck = getString(row, cols.AGENT_NAME);
+        const saNameCheck = getString(row, cols.SUPER_AGENT_NAME);
+        if (name?.toLowerCase() === 'total' ||
+            agentNameCheck?.toLowerCase() === 'total' ||
+            saNameCheck?.toLowerCase() === 'total') {
+            return;
+        }
+
+        const clubInfo = parseClubInfo(row.getCell(cols.CLUB).value);
         if (clubInfo) currentClub = clubInfo;
 
-        const superAgentId = getString(row, MEMBER_COLS.SUPER_AGENT_ID);
-        const superAgentName = getString(row, MEMBER_COLS.SUPER_AGENT_NAME);
-        const agentId = getString(row, MEMBER_COLS.AGENT_ID);
-        const agentName = getString(row, MEMBER_COLS.AGENT_NAME);
-        const memberId = getString(row, MEMBER_COLS.MEMBER_ID);
-        const memberName = getString(row, MEMBER_COLS.MEMBER_NAME);
+        const superAgentId = getString(row, cols.SUPER_AGENT_ID);
+        const superAgentName = getString(row, cols.SUPER_AGENT_NAME);
+        const agentId = getString(row, cols.AGENT_ID);
+        const agentName = getString(row, cols.AGENT_NAME);
+        const memberId = getString(row, cols.MEMBER_ID);
+        const memberName = getString(row, cols.MEMBER_NAME);
 
         if (superAgentId && !users.has(superAgentId)) {
             users.set(superAgentId, {
@@ -175,8 +269,8 @@ function parseMemberStatistics(sheet) {
                 });
             }
 
-            const totalPnl = getNumber(row, MEMBER_COLS.TOTAL_PNL);
-            const totalRake = getNumber(row, MEMBER_COLS.TOTAL_RAKE);
+            const totalPnl = getNumber(row, cols.TOTAL_PNL);
+            const totalRake = getNumber(row, cols.TOTAL_RAKE);
             if (totalPnl !== 0 || totalRake !== 0) {
                 ringTotals.push({ userCode: memberId, totalPnl, totalRake });
             }
@@ -239,6 +333,7 @@ function parseMTTDetail(sheet) {
     
     const sessions = [];
     let currentTableName = 'Tournament';
+    const dataStartRow = findDataStartRow(sheet) || MTT_DATA_START_ROW;
 
     sheet.eachRow((row, rowNumber) => {
         // Check for table name header
@@ -252,7 +347,7 @@ function parseMTTDetail(sheet) {
             return;
         }
 
-        if (rowNumber < MTT_DATA_START_ROW) return;
+        if (rowNumber < dataStartRow) return;
 
         const playerId = getString(row, MTT_COLS.PLAYER_ID);
         const playerName = getString(row, MTT_COLS.PLAYER_NAME);
@@ -307,9 +402,15 @@ export async function parseAndImport(buffer) {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
 
-    const memberSheet = workbook.getWorksheet('Union Member Statistics');
-    const ringSheet = workbook.getWorksheet('Union Ring Game Detail');
-    const mttSheet = workbook.getWorksheet('Union MTT Detail');
+    const memberSheet =
+        workbook.getWorksheet('Union Member Statistics') ||
+        findSheetByKeywords(workbook, ['member', 'statistics']);
+    const ringSheet =
+        workbook.getWorksheet('Union Ring Game Detail') ||
+        findSheetByKeywords(workbook, ['ring', 'detail']);
+    const mttSheet =
+        workbook.getWorksheet('Union MTT Detail') ||
+        findSheetByKeywords(workbook, ['mtt', 'detail']);
 
     if (!memberSheet) {
         throw new Error("Sheet 'Union Member Statistics' not found.");
@@ -418,15 +519,29 @@ export async function parseAndImport(buffer) {
         }
     });
 
-    const ringTotalsToInsert = ringTotals
-        .filter(r => codeToId.has(r.userCode))
-        .map(r => ({
-            userId: codeToId.get(r.userCode),
-            cycleId: currentCycle.id,
-            periodDate: sessionDate,
-            totalPnl: r.totalPnl,
-            totalRake: r.totalRake,
-        }));
+    // Newer exports can contain repeated player rows in the member statistics section.
+    // Consolidate by user to satisfy @@unique([userId, cycleId, periodDate]).
+    const ringTotalsByUser = new Map();
+    for (const r of ringTotals) {
+        const userId = codeToId.get(r.userCode);
+        if (!userId) continue;
+
+        const existing = ringTotalsByUser.get(userId);
+        if (existing) {
+            existing.totalPnl += r.totalPnl;
+            existing.totalRake += r.totalRake;
+        } else {
+            ringTotalsByUser.set(userId, {
+                userId,
+                cycleId: currentCycle.id,
+                periodDate: sessionDate,
+                totalPnl: r.totalPnl,
+                totalRake: r.totalRake,
+            });
+        }
+    }
+
+    const ringTotalsToInsert = Array.from(ringTotalsByUser.values());
 
     if (ringTotalsToInsert.length > 0) {
         await prisma.playerRingTotal.createMany({ data: ringTotalsToInsert });

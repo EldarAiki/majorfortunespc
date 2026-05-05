@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/prisma";
+import { managerSubordinatesWhereClause } from "@/lib/manager-scope";
 
 export async function PATCH(req) {
     const session = await getServerSession(authOptions);
@@ -11,10 +12,56 @@ export async function PATCH(req) {
     }
 
     try {
-        const { userId, rakeback } = await req.json();
+        const { userId, clubId, rakeback } = await req.json();
 
-        if (!userId || rakeback === undefined) {
+        if ((!userId && !clubId) || rakeback === undefined) {
             return NextResponse.json({ error: "Missing data" }, { status: 400 });
+        }
+
+        if (clubId) {
+            if (session.user.role !== "ADMIN" && session.user.role !== "MANAGER") {
+                return NextResponse.json(
+                    { error: "Only admins and managers can set club rakeback" },
+                    { status: 403 }
+                );
+            }
+
+            const parsedRakeback = parseFloat(rakeback);
+            if (Number.isNaN(parsedRakeback)) {
+                return NextResponse.json({ error: "Invalid rakeback value" }, { status: 400 });
+            }
+
+            if (session.user.role === "ADMIN") {
+                const updated = await prisma.user.updateMany({
+                    where: { clubId },
+                    data: { rakeback: parsedRakeback },
+                });
+                return NextResponse.json({ success: true, updated: updated.count });
+            }
+
+            const managerScope = await managerSubordinatesWhereClause(prisma, session.user.id);
+            const eligibleCount = await prisma.user.count({
+                where: {
+                    clubId,
+                    ...managerScope,
+                },
+            });
+
+            if (eligibleCount === 0) {
+                return NextResponse.json(
+                    { error: "You can only modify rakeback for clubs in your scope" },
+                    { status: 403 }
+                );
+            }
+
+            const updated = await prisma.user.updateMany({
+                where: {
+                    clubId,
+                    ...managerScope,
+                },
+                data: { rakeback: parsedRakeback },
+            });
+            return NextResponse.json({ success: true, updated: updated.count });
         }
 
         // Role check for rakeback limit
