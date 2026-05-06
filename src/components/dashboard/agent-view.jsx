@@ -1270,7 +1270,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                 )}
                 {isAdmin && (
                     <TabsTrigger value="union_statistics" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950">
-                        Union statistics
+                        {t("union_statistics")}
                     </TabsTrigger>
                 )}
             </TabsList>
@@ -1618,7 +1618,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
             {isAdmin && (
                 <TabsContent value="union_statistics" className="space-y-6">
                     <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
-                        <span className="text-sm text-muted-foreground">Cycle</span>
+                        <span className="text-sm text-muted-foreground">{t("cycle")}</span>
                         <select
                             value={selectedUnionCycleId}
                             onChange={(e) => setSelectedUnionCycleId(e.target.value)}
@@ -1635,19 +1635,19 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                         {unionLoading && (
                             <span className="text-xs text-muted-foreground flex items-center gap-1">
                                 <RefreshCw className="h-3 w-3 animate-spin" />
-                                Loading cycle data...
+                                {t("loading_cycle_data")}
                             </span>
                         )}
                     </div>
                     <Card className="border-none shadow-lg">
                         <CardHeader>
-                            <CardTitle>Union statistics</CardTitle>
+                            <CardTitle>{t("union_statistics")}</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Number of clubs</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("number_of_clubs")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="text-2xl font-bold">{unionClubCount}</div>
@@ -1655,7 +1655,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Number of sessions</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("number_of_sessions")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="text-2xl font-bold">{unionSessions}</div>
@@ -1663,7 +1663,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total hands</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("total_hands")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="text-2xl font-bold">{unionTotalHands.toLocaleString()}</div>
@@ -1671,7 +1671,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Active players</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("active_players")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="text-2xl font-bold">{unionActivePlayers}</div>
@@ -1679,7 +1679,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total rake</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("total_rake")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className={`text-2xl font-bold ${unionTotalRake >= 0 ? "text-green-600" : "text-red-500"}`}>
@@ -1689,7 +1689,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total winnings</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("total_winnings")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className={`text-2xl font-bold ${unionTotalWinnings >= 0 ? "text-green-600" : "text-red-500"}`}>
@@ -1699,7 +1699,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </Card>
                                 <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
                                     <CardHeader className="pb-2">
-                                        <CardTitle className="text-sm font-medium text-muted-foreground">Cycle range</CardTitle>
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">{t("cycle_range")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <div className="text-sm font-semibold">
@@ -1722,7 +1722,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 <CardContent className="space-y-4">
                                     <div className="grid grid-cols-3 gap-3 text-sm">
                                         <div>
-                                            <p className="text-muted-foreground">Winnings</p>
+                                            <p className="text-muted-foreground">{t("winnings")}</p>
                                             <p className={`font-semibold ${mgr.totalWinnings >= 0 ? "text-green-600" : "text-red-500"}`}>
                                                 {mgr.totalWinnings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                             </p>
@@ -1734,12 +1734,12 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-muted-foreground">Users</p>
+                                            <p className="text-muted-foreground">{t("users")}</p>
                                             <p className="font-semibold">{mgr.usersCount}</p>
                                         </div>
                                     </div>
                                     <div className="border-t pt-3">
-                                        <p className="text-xs text-muted-foreground">Total (Winnings + Rake)</p>
+                                        <p className="text-xs text-muted-foreground">{t("total_winnings_plus_rake")}</p>
                                         <p className={`text-lg font-bold ${mgr.totalCombined >= 0 ? "text-green-600" : "text-red-500"}`}>
                                             {mgr.totalCombined.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </p>
