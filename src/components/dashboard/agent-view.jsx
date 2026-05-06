@@ -702,7 +702,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
         const displayRake = isManagement ? node.groupRake : node.personalRake;
         const displayWinning = isManagement ? node.groupWinning : node.personalWinning;
         const displayRakeback = node.totalRake || 0; // rakeback amount
-        const displayTotal = displayWinning - displayRake;
+        const displayTotal = displayWinning + displayRake;
         const isManagerTable = tableVariant === "manager";
         const showClubRakebackInActions =
             isManagerTable &&
@@ -766,7 +766,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                             </span>
                             {isManagement && (
                                 <span className="text-[10px] block text-muted-foreground font-normal">
-                                    (Personal: {node.personalWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                    {/* (Personal: {node.personalWinning?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}) */}
                                 </span>
                             )}
                         </div>
@@ -778,7 +778,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                             </span>
                             {isManagement && (
                                 <span className="text-[10px] block text-muted-foreground font-normal">
-                                    (Personal: {node.personalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                    {/* (Personal: {node.personalRake?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}) */}
                                 </span>
                             )}
                         </div>
@@ -821,7 +821,7 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                                 </span>
                                 {isManagement && (
                                     <span className="text-[10px] block text-muted-foreground font-normal">
-                                        (Personal: {(node.personalWinning - node.personalRake)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'})
+                                        {/* (Personal: {(node.personalWinning - node.personalRake)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}) */}
                                     </span>
                                 )}
                             </div>
