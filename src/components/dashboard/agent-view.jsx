@@ -309,6 +309,9 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
     const [mgrDrilledUserId, setMgrDrilledUserId] = useState(null);
     const [cycles, setCycles] = useState([]);
     const [cyclesLoading, setCyclesLoading] = useState(false);
+    const [selectedUnionCycleId, setSelectedUnionCycleId] = useState("");
+    const [unionCycleData, setUnionCycleData] = useState(null);
+    const [unionLoading, setUnionLoading] = useState(false);
 
     const isAdmin = user.role === "ADMIN";
     const showManagerActivityTab = isAdmin || user.role === "MANAGER";
@@ -440,6 +443,113 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
         };
         fetchCycles();
     }, []);
+
+    const currentCycle = useMemo(
+        () => cycles.find((c) => c.status === "OPEN") || cycles[0] || null,
+        [cycles]
+    );
+
+    const toInputDate = (value) => {
+        if (!value) return "";
+        return new Date(value).toISOString().slice(0, 10);
+    };
+
+    useEffect(() => {
+        if (!isAdmin) return;
+        if (!cycles.length) return;
+        if (selectedUnionCycleId) return;
+        const defaultCycle = cycles.find((c) => c.status === "OPEN") || cycles[0];
+        if (defaultCycle?.id) setSelectedUnionCycleId(defaultCycle.id);
+    }, [isAdmin, cycles, selectedUnionCycleId]);
+
+    useEffect(() => {
+        const fetchUnionCycleData = async () => {
+            if (!isAdmin || !selectedUnionCycleId) return;
+            setUnionLoading(true);
+            try {
+                const res = await fetch(`/api/cycles/${selectedUnionCycleId}/activity`);
+                const data = await res.json();
+                if (data?.players) {
+                    setUnionCycleData(data);
+                }
+            } catch (error) {
+                console.error("Failed to fetch union cycle data:", error);
+            } finally {
+                setUnionLoading(false);
+            }
+        };
+        fetchUnionCycleData();
+    }, [isAdmin, selectedUnionCycleId]);
+
+    const selectedUnionCycle = useMemo(() => {
+        if (!cycles.length) return null;
+        return cycles.find((c) => c.id === selectedUnionCycleId) || currentCycle || cycles[0];
+    }, [cycles, selectedUnionCycleId, currentCycle]);
+
+    const unionPlayers = useMemo(() => {
+        if (unionCycleData?.players) return unionCycleData.players;
+        if (selectedUnionCycle?.id === currentCycle?.id) return subPlayers || [];
+        return [];
+    }, [unionCycleData, selectedUnionCycle, currentCycle, subPlayers]);
+
+    const formatDateRangeLabel = (cycle) => {
+        if (!cycle) return "-";
+        const from = new Date(cycle.startDate).toLocaleDateString();
+        const to =
+            cycle.status === "OPEN"
+                ? new Date().toLocaleDateString()
+                : new Date(cycle.endDate).toLocaleDateString();
+        return `${from} - ${to}`;
+    };
+    const unionClubCount = useMemo(
+        () => new Set(unionPlayers.map((p) => p.clubId).filter(Boolean)).size,
+        [unionPlayers]
+    );
+    const unionSessions = useMemo(
+        () => unionPlayers.reduce((sum, p) => sum + (p.totalSessions || 0), 0),
+        [unionPlayers]
+    );
+    const unionTotalHands = useMemo(
+        () => unionPlayers.reduce((sum, p) => sum + (p.totalHands || 0), 0),
+        [unionPlayers]
+    );
+    const unionActivePlayers = useMemo(
+        () => unionPlayers.filter((p) => (p.totalSessions || 0) > 0).length,
+        [unionPlayers]
+    );
+    const unionTotalRake = useMemo(
+        () => unionPlayers.reduce((sum, p) => sum + (p.totalRake || 0), 0),
+        [unionPlayers]
+    );
+    const unionTotalWinnings = useMemo(
+        () => unionPlayers.reduce((sum, p) => sum + (p.totalWinnings || 0), 0),
+        [unionPlayers]
+    );
+
+    const managerUnionCards = useMemo(() => {
+        if (!isAdmin) return [];
+        return (managers || []).map((mgr) => {
+            const scoped = filterUsersForManager(
+                unionPlayers,
+                mgr.id,
+                clubFullByClubId
+            );
+            const totalWinnings = scoped.reduce(
+                (sum, p) => sum + (p.totalWinnings || 0),
+                0
+            );
+            const totalRake = scoped.reduce((sum, p) => sum + (p.totalRake || 0), 0);
+            return {
+                id: mgr.id,
+                code: mgr.code,
+                name: mgr.name || mgr.code,
+                usersCount: scoped.length,
+                totalWinnings,
+                totalRake,
+                totalCombined: totalWinnings + totalRake,
+            };
+        });
+    }, [isAdmin, managers, unionPlayers, clubFullByClubId]);
 
     const handleUpdateRakeback = async () => {
         if (!selectedRakebackTarget || newRakeback === "") return;
@@ -1158,6 +1268,11 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                         {t("manager_activity")}
                     </TabsTrigger>
                 )}
+                {isAdmin && (
+                    <TabsTrigger value="union_statistics" className="data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-950">
+                        Union statistics
+                    </TabsTrigger>
+                )}
             </TabsList>
 
             <TabsContent value="stats" className="space-y-4">
@@ -1497,6 +1612,149 @@ export default function AgentView({ user, games, subPlayers, clubFullByClubId = 
                             </Table>
                         </CardContent>
                     </Card>
+                </TabsContent>
+            )}
+
+            {isAdmin && (
+                <TabsContent value="union_statistics" className="space-y-6">
+                    <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+                        <span className="text-sm text-muted-foreground">Cycle</span>
+                        <select
+                            value={selectedUnionCycleId}
+                            onChange={(e) => setSelectedUnionCycleId(e.target.value)}
+                            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        >
+                            {cycles.map((cycle) => (
+                                <option key={cycle.id} value={cycle.id}>
+                                    {cycle.status === "OPEN"
+                                        ? `${t("current_cycle") || "Current Cycle"} (${new Date(cycle.startDate).toLocaleDateString()})`
+                                        : formatCycleDate(cycle)}
+                                </option>
+                            ))}
+                        </select>
+                        {unionLoading && (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <RefreshCw className="h-3 w-3 animate-spin" />
+                                Loading cycle data...
+                            </span>
+                        )}
+                    </div>
+                    <Card className="border-none shadow-lg">
+                        <CardHeader>
+                            <CardTitle>Union statistics</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Number of clubs</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">{unionClubCount}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Number of sessions</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">{unionSessions}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total hands</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">{unionTotalHands.toLocaleString()}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Active players</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-2xl font-bold">{unionActivePlayers}</div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total rake</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className={`text-2xl font-bold ${unionTotalRake >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                            {unionTotalRake.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Total winnings</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className={`text-2xl font-bold ${unionTotalWinnings >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                            {unionTotalWinnings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                                <Card className="bg-white dark:bg-zinc-900 border-none shadow-md">
+                                    <CardHeader className="pb-2">
+                                        <CardTitle className="text-sm font-medium text-muted-foreground">Cycle range</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="text-sm font-semibold">
+                                            {formatDateRangeLabel(selectedUnionCycle)}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        {managerUnionCards.map((mgr) => (
+                            <Card key={mgr.id} className="border-none shadow-lg">
+                                <CardHeader>
+                                    <CardTitle className="text-base">
+                                        {mgr.code} - {mgr.name}
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="grid grid-cols-3 gap-3 text-sm">
+                                        <div>
+                                            <p className="text-muted-foreground">Winnings</p>
+                                            <p className={`font-semibold ${mgr.totalWinnings >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                                {mgr.totalWinnings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-muted-foreground">Rake</p>
+                                            <p className={`font-semibold ${mgr.totalRake >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                                {mgr.totalRake.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-muted-foreground">Users</p>
+                                            <p className="font-semibold">{mgr.usersCount}</p>
+                                        </div>
+                                    </div>
+                                    <div className="border-t pt-3">
+                                        <p className="text-xs text-muted-foreground">Total (Winnings + Rake)</p>
+                                        <p className={`text-lg font-bold ${mgr.totalCombined >= 0 ? "text-green-600" : "text-red-500"}`}>
+                                            {mgr.totalCombined.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </p>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                        {managerUnionCards.length === 0 && (
+                            <Card className="border-none shadow-lg md:col-span-2 xl:col-span-3">
+                                <CardContent className="py-8 text-center text-muted-foreground italic">
+                                    {t("no_managers_defined") || "No manager users defined."}
+                                </CardContent>
+                            </Card>
+                        )}
+                    </div>
                 </TabsContent>
             )}
 

@@ -106,7 +106,7 @@ export default async function DashboardPage() {
                 manager: { select: { name: true, code: true } },
                 gameSessions: {
                     where: { cycleId: currentCycleId },
-                    select: { rake: true, pnl: true, gameType: true }
+                    select: { rake: true, pnl: true, gameType: true, hands: true }
                 },
                 playerRingTotals: {
                     where: { cycleId: currentCycleId },
@@ -124,13 +124,20 @@ export default async function DashboardPage() {
             const totalPnL = ringPnl + mttPnl;
             const totalRake = ringRake + mttRake;
             const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
+            const totalSessions = (p.gameSessions || []).length;
+            const totalHands = (p.gameSessions || []).reduce(
+                (s, gs) => s + (gs.hands || 0),
+                0
+            );
             const { gameSessions, playerRingTotals, balance: _storedBalance, ...rest } = p;
             return {
                 ...rest,
                 balance: totalPnL + totalRakebackAmount, // balance = winnings + rakeback
                 totalWinnings: totalPnL,
                 totalRakebackAmount,
-                totalRake
+                totalRake,
+                totalSessions,
+                totalHands,
             };
         });
     }

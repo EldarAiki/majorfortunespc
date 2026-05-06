@@ -64,7 +64,7 @@ export async function GET(req, { params }) {
                 manager: { select: { name: true, code: true } },
                 gameSessions: {
                     where: { cycleId },
-                    select: { rake: true, pnl: true, gameType: true }
+                    select: { rake: true, pnl: true, gameType: true, hands: true }
                 },
                 playerRingTotals: {
                     where: { cycleId },
@@ -82,13 +82,20 @@ export async function GET(req, { params }) {
             const totalPnL = ringPnl + mttPnl;
             const totalRake = ringRake + mttRake;
             const totalRakebackAmount = (totalRake * (p.rakeback || 0)) / 100;
+            const totalSessions = (p.gameSessions || []).length;
+            const totalHands = (p.gameSessions || []).reduce(
+                (s, gs) => s + (gs.hands || 0),
+                0
+            );
             const { gameSessions, playerRingTotals, ...rest } = p;
             return {
                 ...rest,
                 balance: totalPnL + totalRakebackAmount,
                 totalWinnings: totalPnL,
                 totalRakebackAmount,
-                totalRake
+                totalRake,
+                totalSessions,
+                totalHands,
             };
         });
 
